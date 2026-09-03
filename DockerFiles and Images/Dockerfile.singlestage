@@ -1,0 +1,12 @@
+# The SAME app built WITHOUT multi-stage, kept only for the size comparison
+# in README.md. This image ships the whole Go toolchain just to run one binary.
+# Name: Hemang | Enrollment number: 24bcs10209
+FROM golang:1.23-alpine
+WORKDIR /src
+
+COPY main.go .
+RUN go mod init hello-multistage >/dev/null 2>&1 \
+ && CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/hello .
+
+EXPOSE 8080
+ENTRYPOINT ["/out/hello"]

@@ -1,0 +1,9 @@
+{
+  "name": "nodejs-hello-docker",
+  "version": "1.0.0",
+  "description": "Hello World Node.js app running in Docker",
+  "main": "app.js",
+  "scripts": { "start": "node app.js" },
+  "author": "Hemang (24bcs10209)",
+  "license": "MIT"
+}

@@ -1,0 +1,9 @@
+# Ubuntu 24.04 with systemd as PID 1 so that systemd-journald actually runs
+# and `journalctl` has a real journal to read. Used only for the journalctl task.
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        systemd systemd-sysv nginx adduser passwd iproute2 && \
+    rm -rf /var/lib/apt/lists/*
+CMD ["/sbin/init"]
