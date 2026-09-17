@@ -1,0 +1,27 @@
+# A Deployment: the controller that owns a ReplicaSet, which owns the Pods.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: k8s-lab
+  labels:
+    app: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:          # how the Deployment finds the Pods it owns
+      app: web
+  template:               # the Pod template - everything below is a Pod spec
+    metadata:
+      labels:
+        app: web          # MUST match spec.selector.matchLabels
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { cpu: "10m",  memory: "16Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }

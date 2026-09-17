@@ -1,0 +1,15 @@
+# ClusterIP - the DEFAULT. Reachable only from inside the cluster.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-clusterip
+  namespace: k8s-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 80          # the port the SERVICE listens on
+      targetPort: 80    # the port on the POD

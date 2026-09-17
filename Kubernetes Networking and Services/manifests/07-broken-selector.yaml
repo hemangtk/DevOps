@@ -1,0 +1,15 @@
+# TROUBLESHOOTING: a Service whose selector matches nothing.
+# It gets a ClusterIP but ZERO endpoints - the classic "connection refused".
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata:
+  name: broken-service
+  namespace: k8s-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: backedn          # <-- deliberate typo: should be "backend"
+  ports:
+    - port: 80
+      targetPort: 80

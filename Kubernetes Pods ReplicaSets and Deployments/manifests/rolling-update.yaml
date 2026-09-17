@@ -1,0 +1,28 @@
+# Rolling update: replace pods gradually, never dropping below 2 available.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-rolling
+  namespace: k8s-lab
+spec:
+  replicas: 4
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1   # at most 1 pod down at a time
+      maxSurge: 1         # at most 1 extra pod above replicas
+  selector:
+    matchLabels: { app: web-rolling }
+  template:
+    metadata:
+      labels: { app: web-rolling }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports: [{ containerPort: 80 }]
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 1
+            periodSeconds: 2

@@ -1,0 +1,15 @@
+# A single Pod, written declaratively.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hello-declarative
+  namespace: k8s-lab
+  labels:
+    app: hello
+spec:
+  containers:
+    - name: web
+      image: nginx:alpine
+      ports:
+        - containerPort: 80

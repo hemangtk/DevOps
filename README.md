@@ -16,6 +16,10 @@ alongside.
 | [`Docker Fundamentals/`](Docker%20Fundamentals/) | Six Hello World containers: Node.js, Python, Java, Apache, React, Nginx | Hello World Applications |
 | [`DockerFiles and Images/`](DockerFiles%20and%20Images/) | Multi-stage Go build — 467 MB toolchain down to a 6.98 MB image, on port 8080 | Tasks 1–3 |
 | [`Docker Networks/`](Docker%20Networks/) | Three-tier networks, host network, bind mounts, overlay networks | Tasks 1–4 |
+| [`Kubernetes Fundamentals/`](Kubernetes%20Fundamentals/) | Architecture, control plane, namespaces, the first Pod | Session 9 |
+| [`Kubernetes Pods ReplicaSets and Deployments/`](Kubernetes%20Pods%20ReplicaSets%20and%20Deployments/) | Self-healing, scaling, rolling update, recreate, blue-green, canary, pod lifecycle | Session 10 |
+| [`Kubernetes Networking and Services/`](Kubernetes%20Networking%20and%20Services/) | ClusterIP, NodePort, LoadBalancer, ExternalName, headless, DNS | Session 11 |
+| [`Kubernetes Ingress ConfigMaps and Secrets/`](Kubernetes%20Ingress%20ConfigMaps%20and%20Secrets/) | ConfigMaps, Secrets, path-based Ingress routing | Session 12 |
 
 Each folder has its own README with the commands, the real output, an explanation of what the
 output means, and screenshots.
@@ -34,12 +38,24 @@ output means, and screenshots.
   [`Docker Networks/`](Docker%20Networks/)
 - **A live overlay network** created in swarm mode, with a two-replica service behind one
   virtual IP — [`Docker Networks/`](Docker%20Networks/#task-4--overlay-network)
+- **All four Kubernetes deployment strategies run for real** — a rolling update with both
+  versions live at once, a blue-green cutover proved by the `Server:` header flipping
+  1.25 → 1.27, and a canary measured at a 24:8 traffic split —
+  [`Kubernetes Pods ReplicaSets and Deployments/`](Kubernetes%20Pods%20ReplicaSets%20and%20Deployments/)
+- **All five Service types**, including a headless Service resolving to every pod IP and a
+  deliberate one-character selector typo producing the classic empty-endpoints bug —
+  [`Kubernetes Networking and Services/`](Kubernetes%20Networking%20and%20Services/)
+- **Path-based Ingress routing** — one IP and port 80 serving two apps, plus a demonstration
+  that a Secret is base64-*encoded*, not encrypted —
+  [`Kubernetes Ingress ConfigMaps and Secrets/`](Kubernetes%20Ingress%20ConfigMaps%20and%20Secrets/)
 
 ---
 
 ## Environment
 
 - macOS (Apple Silicon), Docker Desktop **29.5.2**
+- Kubernetes topics: **minikube v1.39.0** running **Kubernetes v1.37.0** (containerd), with the
+  `ingress-nginx` addon enabled. All Kubernetes work is in the `k8s-lab` namespace.
 - Linux-only commands (`useradd`, `adduser`, `journalctl`, `ip`, `ss`) were run in **Ubuntu
   24.04** containers. The `journalctl` task needs a live `systemd`, so it used a container
   booted with `/sbin/init` as PID 1 — see

@@ -1,0 +1,51 @@
+# Blue-Green: two full environments; a Service selector flips traffic instantly.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-blue
+  namespace: k8s-lab
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: bg-app, version: blue }
+  template:
+    metadata:
+      labels: { app: bg-app, version: blue }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine      # "v1" - the live version
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-green
+  namespace: k8s-lab
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: bg-app, version: green }
+  template:
+    metadata:
+      labels: { app: bg-app, version: green }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine      # "v2" - staged, receiving no traffic
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bg-service
+  namespace: k8s-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: bg-app
+    version: blue          # <-- THE SWITCH. Change to green to cut traffic over.
+  ports:
+    - port: 80
+      targetPort: 80

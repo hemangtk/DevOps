@@ -1,0 +1,51 @@
+# Canary: one Service selects BOTH versions; the replica ratio is the traffic split.
+# 4 stable + 1 canary = roughly 20% of requests hit the new version.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canary-stable
+  namespace: k8s-lab
+spec:
+  replicas: 4
+  selector:
+    matchLabels: { app: canary-app, track: stable }
+  template:
+    metadata:
+      labels: { app: canary-app, track: stable }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.25-alpine
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canary-new
+  namespace: k8s-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: canary-app, track: canary }
+  template:
+    metadata:
+      labels: { app: canary-app, track: canary }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: canary-service
+  namespace: k8s-lab
+spec:
+  type: ClusterIP
+  selector:
+    app: canary-app        # NOTE: no 'track' - matches stable AND canary pods
+  ports:
+    - port: 80
+      targetPort: 80

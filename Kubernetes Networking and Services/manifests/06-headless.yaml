@@ -1,0 +1,16 @@
+# Headless (clusterIP: None) - DNS returns every POD IP, no load balancing.
+# Used by StatefulSets so each replica is individually addressable.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-headless
+  namespace: k8s-lab
+spec:
+  clusterIP: None
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

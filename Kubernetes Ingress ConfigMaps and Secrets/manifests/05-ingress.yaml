@@ -1,0 +1,28 @@
+# Ingress - ONE entry point, path-based routing to several Services.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: k8s-lab
+  annotations:
+    # rewrite /api/foo -> /foo before it reaches the backend
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: devops.local
+      http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: api-svc
+                port: { number: 80 }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-svc
+                port: { number: 80 }

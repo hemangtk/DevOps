@@ -1,0 +1,94 @@
+# Pod lifecycle: init containers, readiness, liveness, and the terminal phases.
+# Name: Hemang | Enrollment number: 24bcs10209
+---
+# 1. INIT CONTAINER - must finish successfully before the app container starts
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-init
+  namespace: k8s-lab
+spec:
+  initContainers:
+    - name: wait-for-it
+      image: busybox:1.36
+      command: ['sh', '-c', 'echo "init: preparing..."; sleep 8; echo "init: done"']
+  containers:
+    - name: app
+      image: nginx:alpine
+---
+# 2. READINESS PROBE - pod is Running but NOT Ready until the file exists
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-readiness
+  namespace: k8s-lab
+  labels: { demo: readiness }
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ['sh', '-c', 'sleep 15; touch /tmp/ready; sleep 3600']
+      readinessProbe:
+        exec:
+          command: ['cat', '/tmp/ready']
+        initialDelaySeconds: 2
+        periodSeconds: 3
+---
+# 3. LIVENESS PROBE - container is killed and restarted when the probe fails
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-liveness
+  namespace: k8s-lab
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      # healthy for 20s, then the file goes away and the probe starts failing
+      command: ['sh', '-c', 'touch /tmp/healthy; sleep 20; rm -f /tmp/healthy; sleep 3600']
+      livenessProbe:
+        exec:
+          command: ['cat', '/tmp/healthy']
+        initialDelaySeconds: 3
+        periodSeconds: 3
+        failureThreshold: 2
+---
+# 4. SUCCEEDED - a pod that does a job and exits 0
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-succeeded
+  namespace: k8s-lab
+spec:
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: busybox:1.36
+      command: ['sh', '-c', 'echo "doing work"; sleep 3; echo "finished"; exit 0']
+---
+# 5. FAILED - a pod that exits non-zero
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-failed
+  namespace: k8s-lab
+spec:
+  restartPolicy: Never
+  containers:
+    - name: worker
+      image: busybox:1.36
+      command: ['sh', '-c', 'echo "about to fail"; sleep 2; exit 1']
+---
+# 6. PENDING - asks for more resources than the cluster has, so it never schedules
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-pending
+  namespace: k8s-lab
+spec:
+  containers:
+    - name: app
+      image: nginx:alpine
+      resources:
+        requests:
+          memory: "500Gi"      # deliberately impossible

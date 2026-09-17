@@ -1,0 +1,16 @@
+# LoadBalancer - asks the cloud provider for an external LB.
+# On minikube this stays <pending> unless `minikube tunnel` is running.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-loadbalancer
+  namespace: k8s-lab
+spec:
+  type: LoadBalancer
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
