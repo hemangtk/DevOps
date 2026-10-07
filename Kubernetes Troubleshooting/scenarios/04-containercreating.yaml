@@ -1,0 +1,15 @@
+# BROKEN: mounts a ConfigMap that does not exist, so the pod sticks in
+# ContainerCreating / CreateContainerConfigError forever.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata: { name: creating-broken, namespace: s14 }
+spec:
+  containers:
+    - name: app
+      image: nginx:1.27-alpine
+      volumeMounts:
+        - { name: cfg, mountPath: /etc/config }
+  volumes:
+    - name: cfg
+      configMap: { name: missing-configmap }

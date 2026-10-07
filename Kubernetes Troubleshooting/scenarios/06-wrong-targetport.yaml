@@ -1,0 +1,9 @@
+# BROKEN: selector is right, but targetPort points at a port nothing listens on.
+# Endpoints ARE populated - which is what makes this one confusing.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata: { name: web-svc-badport, namespace: s14 }
+spec:
+  selector: { app: web }
+  ports: [{ port: 80, targetPort: 8080 }]   # nginx listens on 80, not 8080

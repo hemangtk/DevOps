@@ -1,0 +1,11 @@
+# BROKEN: requests more memory than any node has, so the scheduler can never place it.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata: { name: pending-broken, namespace: s14 }
+spec:
+  containers:
+    - name: app
+      image: nginx:1.27-alpine
+      resources:
+        requests: { memory: "900Gi", cpu: "100m" }

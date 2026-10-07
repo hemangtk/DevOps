@@ -1,0 +1,9 @@
+# BROKEN: the image tag does not exist in the registry.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata: { name: imagepull-broken, namespace: s14 }
+spec:
+  containers:
+    - name: app
+      image: nginx:1.99-does-not-exist

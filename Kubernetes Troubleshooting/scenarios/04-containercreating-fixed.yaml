@@ -1,0 +1,20 @@
+# FIXED: create the ConfigMap the pod expects.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: present-configmap, namespace: s14 }
+data:
+  app.conf: "mode=production"
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: creating-fixed, namespace: s14 }
+spec:
+  containers:
+    - name: app
+      image: nginx:1.27-alpine
+      volumeMounts:
+        - { name: cfg, mountPath: /etc/config }
+  volumes:
+    - name: cfg
+      configMap: { name: present-configmap }
