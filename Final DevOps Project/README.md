@@ -6,6 +6,9 @@
 Session 21. The capstone: one application carried from source code to a monitored, autoscaling,
 GitOps-managed Kubernetes deployment — using every tool from the previous twenty sessions.
 
+**Live proof:** [capstone pipeline run #37642598222](https://github.com/hemangtk/DevOps/actions/runs/37642598222)
+— all 5 jobs green, release gate passed.
+
 Project: [`final-devops-project/`](final-devops-project/)
 
 ---
@@ -387,6 +390,15 @@ manifests ┘
 | **image** | Build, smoke-test the running container, Trivy scan gating on fixable CRITICAL |
 | **manifests** | `kubeconform -strict` on the YAML, `helm lint` on the chart |
 | **gate** | Fails unless all four succeeded — deploy cannot run otherwise |
+
+```console
+$ gh run view 37642598222 --json jobs
+Build and test                 ->  success
+Security scans                 ->  success
+Validate manifests and chart   ->  success
+Image build and scan           ->  success
+Release gate                   ->  success
+```
 
 The security controls are inventoried in
 [`final-devops-project/security/README.md`](final-devops-project/security/), including an honest
