@@ -24,6 +24,7 @@ alongside.
 | [`Kubernetes Troubleshooting/`](Kubernetes%20Troubleshooting/) | Nine failures, each broken then diagnosed and fixed | Session 14 |
 | [`Helm/`](Helm/) | A chart from scratch, install/upgrade/rollback/uninstall | Session 15 |
 | [`CICD and GitHub Actions/`](CICD%20and%20GitHub%20Actions/) | A CI pipeline that really runs on every push | Session 16 |
+| [`DevSecOps/`](DevSecOps/) | SAST, SCA, secret and image scanning behind a real security gate | Session 17 |
 
 Each folder has its own README with the commands, the real output, an explanation of what the
 output means, and screenshots.
