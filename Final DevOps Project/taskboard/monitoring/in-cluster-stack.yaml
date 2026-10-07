@@ -1,0 +1,158 @@
+# A lightweight in-cluster Prometheus + Grafana that scrapes TaskBoard.
+# (prometheus-values.yaml is the production path via kube-prometheus-stack;
+#  this is the same thing small enough to run on minikube.)
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Namespace
+metadata: { name: monitoring }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: prometheus, namespace: monitoring }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: prometheus }
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/metrics, services, endpoints, pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: prometheus }
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: prometheus-config, namespace: monitoring }
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 10s
+    scrape_configs:
+      - job_name: prometheus
+        static_configs: [{ targets: ['localhost:9090'] }]
+
+      # discover TaskBoard pods by their prometheus.io/* annotations
+      - job_name: taskboard-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [taskboard] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: prometheus, namespace: monitoring }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata: { labels: { app: prometheus } }
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+          ports: [{ containerPort: 9090 }]
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus }
+            - { name: data, mountPath: /prometheus }
+      volumes:
+        - name: config
+          configMap: { name: prometheus-config }
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: prometheus, namespace: monitoring }
+spec:
+  type: NodePort
+  selector: { app: prometheus }
+  ports: [{ port: 9090, targetPort: 9090, nodePort: 30900 }]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: grafana-datasource, namespace: monitoring }
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus.monitoring:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: grafana-dashboard-provider, namespace: monitoring }
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: taskboard
+        folder: TaskBoard
+        type: file
+        options: { path: /var/lib/grafana/dashboards }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: grafana, namespace: monitoring }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: grafana } }
+  template:
+    metadata: { labels: { app: grafana } }
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          env:
+            - { name: GF_SECURITY_ADMIN_PASSWORD, value: admin }
+            - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "true" }
+            - { name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Admin }
+          ports: [{ containerPort: 3000 }]
+          volumeMounts:
+            - { name: datasource, mountPath: /etc/grafana/provisioning/datasources }
+            - { name: provider, mountPath: /etc/grafana/provisioning/dashboards }
+            - { name: dashboards, mountPath: /var/lib/grafana/dashboards }
+      volumes:
+        - name: datasource
+          configMap: { name: grafana-datasource }
+        - name: provider
+          configMap: { name: grafana-dashboard-provider }
+        - name: dashboards
+          configMap: { name: taskboard-grafana-dashboard }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: grafana, namespace: monitoring }
+spec:
+  type: NodePort
+  selector: { app: grafana }
+  ports: [{ port: 3000, targetPort: 3000, nodePort: 30300 }]

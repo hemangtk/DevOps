@@ -3,473 +3,527 @@
 **Name:** Hemang
 **Enrollment number:** 24bcs10209
 
-Session 21. The capstone: one application carried from source code to a monitored, autoscaling,
-GitOps-managed Kubernetes deployment — using every tool from the previous twenty sessions.
+Session 21 capstone, built against the course's
+[`session21-python/GRADING.md`](https://github.com/Nency-Ravaliya/devops-heros/tree/main/session21-python)
+rubric — a React + FastAPI + PostgreSQL application taken from source to a scanned image in
+GHCR to a running, autoscaling, monitored Kubernetes deployment.
 
-**Live proof:** [capstone pipeline run #37642598222](https://github.com/hemangtk/DevOps/actions/runs/37642598222)
-— all 5 jobs green, release gate passed.
+**Live proof:** [pipeline run #37648052047](https://github.com/hemangtk/DevOps/actions/runs/37648052047)
+— all 6 jobs green, both images pushed to GHCR.
 
-Project: [`final-devops-project/`](final-devops-project/)
-
----
-
-## 1. Overview
-
-**TaskBoard** is a small task API with a web front page. It is deliberately simple so the
-*pipeline around it* is the interesting part.
-
-| Layer | Technology |
-|---|---|
-| Application | Python 3.12, Flask, psycopg |
-| Database | PostgreSQL 16, with a PersistentVolumeClaim |
-| Container | Multi-stage Dockerfile, non-root, 254 MB |
-| Orchestration | Kubernetes — Deployment, Service, ConfigMap, Secret, Ingress, HPA, PVC, NetworkPolicy |
-| Packaging | Helm chart |
-| Infrastructure | Terraform (LocalStack) |
-| CI/CD | GitHub Actions |
-| Security | bandit, pip-audit, gitleaks, Trivy, hardened `securityContext` |
-| Monitoring | `/metrics` in Prometheus exposition format |
-| GitOps | ArgoCD |
+Project: [`taskboard/`](taskboard/) · Pipeline: [`.github/workflows/taskboard.yml`](../.github/workflows/taskboard.yml)
 
 ---
 
-## 2. Architecture
+## Rubric coverage
+
+| Module | Requirement | Evidence |
+|---|---|---|
+| **M1** Application | FastAPI, Alembic, React frontend, compose | [§1](#m1--application) |
+| **M2** Testing | pytest, 5+ tests, test DB not prod | [§2](#m2--testing) |
+| **M3** Git | Public repo, commit messages, `.gitignore` | [§3](#m3--git-and-github) |
+| **M4** Docker | Both Dockerfiles, multi-stage, non-root, compose | [§4](#m4--docker) |
+| **M5** CI/CD | pytest, frontend build, both images, GHCR, SHA tags | [§5](#m5--cicd) |
+| **M6** DevSecOps | Trivy on both images, gate on HIGH/CRITICAL | [§6](#m6--devsecops) |
+| **M7** Terraform | VPC + 2 public subnets, EKS + node group | [§7](#m7--terraform) |
+| **M8** Kubernetes + Helm | Chart deploys both tiers, ingress split, 2 replicas | [§8](#m8--kubernetes--helm) |
+| **M9** Observability | `/metrics`, Prometheus scraping, Grafana panel | [§9](#m9--observability) |
+| **M10** Documentation | Project README, demo | [§10](#m10--documentation) |
+
+---
+
+## Architecture
 
 ```text
-   Developer ──push──► GitHub ──► GitHub Actions
-                          │         ├── lint + pytest
-                          │         ├── SAST / SCA / secret scan
-                          │         ├── docker build + smoke test + Trivy
-                          │         ├── kubeconform + helm lint
-                          │         └── RELEASE GATE ──► ArgoCD
-                          │                                 │ pulls
-                          └─────────────────────────────────┘
-                                                            ▼
-┌──────────────────────── Kubernetes namespace: taskboard ────────────────────┐
-│                                                                             │
-│   Ingress (nginx)  taskboard.local ──► Service taskboard :80                │
-│                                              │                              │
-│                                   ┌──────────▼──────────┐                   │
-│                                   │ Deployment taskboard│  HPA 2→8 @60% CPU │
-│                                   │  initContainer: wait-for-postgres       │
-│                                   │  startup + readiness + liveness probes  │
-│                                   │  runAsNonRoot, readOnlyRootFilesystem   │
-│                                   │  ConfigMap + Secret → env               │
-│                                   └──────────┬──────────┘                   │
-│                                              │ NetworkPolicy: only this app │
-│                                   ┌──────────▼──────────┐                   │
-│                                   │ Service postgres    │                   │
-│                                   │ Deployment postgres │                   │
-│                                   │   PVC postgres-data │ 1Gi RWO           │
-│                                   └─────────────────────┘                   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Repository layout
-
-```text
-final-devops-project/
-├── application/     Flask app, tests, requirements
-├── docker/          multi-stage Dockerfile
-├── kubernetes/      00-namespace … 07-networkpolicy
-├── helm/taskboard/  chart
-├── terraform/       S3 artifact bucket
-├── security/        the control inventory
-├── monitoring/      Prometheus scrape config
-├── gitops/          ArgoCD Application
-└── (CI lives at .github/workflows/capstone.yml, which must be at the repo root)
+Developer ──push──► GitHub ──► Actions
+                       │  ├── flake8 + pytest (12 tests, 95%)
+                       │  ├── vite build
+                       │  ├── bandit / pip-audit / gitleaks
+                       │  ├── build both images → smoke test → Trivy gate
+                       │  ├── push to GHCR, tagged <commit-sha>
+                       │  └── kubeconform + helm lint + terraform validate
+                       ▼
+          ┌──────── Kubernetes namespace: taskboard ────────┐
+          │  Ingress  taskboard.local                       │
+          │     /  ──────────────► frontend Svc ──► 2 pods  │
+          │     /api ────────────► backend  Svc ──► 2 pods  │ HPA 2→8 @60%
+          │                              │                  │
+          │                        postgres Svc ──► 1 pod   │
+          │                              └── PVC 1Gi        │
+          └─────────────────────────────────────────────────┘
+                       ▲ scrape /metrics
+          Prometheus ──┘  ──► Grafana dashboard
 ```
 
 ---
 
-## 3. The application
+## M1 — Application
 
-Three endpoints matter beyond the API itself, and the split between them is deliberate:
-
-```python
-@app.route("/health")      # LIVENESS - process only. Does NOT touch the database.
-@app.route("/ready")       # READINESS - DOES check the database.
-@app.route("/metrics")     # Prometheus exposition format
-```
-
-> **Why `/health` must not check the database:** if it did, a slow or restarting database would
-> fail liveness on every pod, Kubernetes would restart them all, and the reconnect storm would
-> make the outage worse. Section 7 demonstrates exactly this, and shows the correct behaviour.
-
-Tests and lint pass locally before anything is pushed:
+**FastAPI backend, SQLAlchemy models, Pydantic schemas, Alembic migrations, React/Vite frontend,
+PostgreSQL** — all three running under `docker compose up --build`.
 
 ```console
-$ flake8 app tests --max-line-length=100
-clean
+$ docker compose up --build
+$ docker compose ps
+SERVICE    STATUS                        PORTS
+backend    Up 23 seconds (healthy)       0.0.0.0:8000->8000/tcp
+frontend   Up 23 seconds (healthy)       0.0.0.0:8080->8080/tcp
+postgres   Up About a minute (healthy)   5432/tcp
+```
 
+### Alembic really migrates
+
+```console
+$ docker compose logs backend | grep -i alembic
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, create tasks table
+
+$ docker compose exec postgres psql -U taskboard -d taskboard -c '\dt'
+ Schema |      Name       | Type  |   Owner
+--------+-----------------+-------+-----------
+ public | alembic_version | table | taskboard
+ public | tasks           | table | taskboard
+
+$ docker compose exec postgres psql -U taskboard -d taskboard -c 'SELECT version_num FROM alembic_version;'
+ 0001
+```
+
+### Eight endpoints, all exercised
+
+```console
+$ curl -s localhost:8000/health
+{"status":"ok","version":"1.0.0-compose","environment":"compose"}
+
+$ curl -s localhost:8000/ready
+{"status":"ready","database":"reachable"}
+
+--- POST ---
+{"id":1,"title":"Build the capstone to spec","description":"all 10 modules","done":false,...}
+
+--- GET list ---
+[{"id":1,...},{"id":2,...}]
+
+--- GET one ---
+{"id":1,"title":"Build the capstone to spec",...}
+
+--- PUT ---
+{"id":1,...,"done":true,...}
+
+--- DELETE ---
+DELETE /api/tasks/2 -> HTTP 204
+```
+
+### The frontend renders and calls the API
+
+```console
+$ curl -s localhost:8080/ | head -c 200
+<!doctype html><html lang="en"><head>...<title>TaskBoard</title>
+<script type="module" crossorigin src="/assets/index-CegQPomn.js">
+
+$ curl -s localhost:8080/api/tasks        # nginx proxies /api to the backend
+[{"id":1,"title":"Build the capstone to spec",...}]
+```
+
+![the running application](screenshots/frontend-ui.png)
+
+Task #1 is struck through (`done: true`), #3 is open — real data from the API, with working
+Add / Done / Delete controls.
+
+![compose stack](screenshots/compose-stack.png)
+
+---
+
+## M2 — Testing
+
+```console
 $ pytest --cov=app
-tests/test_api.py::test_health_is_ok PASSED
-tests/test_api.py::test_ready_is_ok_with_memory_store PASSED
-tests/test_api.py::test_metrics_exposes_prometheus_format PASSED
-tests/test_api.py::test_create_and_list_task PASSED
+tests/test_api.py::test_health_returns_ok PASSED
+tests/test_api.py::test_ready_reports_database_reachable PASSED
+tests/test_api.py::test_metrics_is_prometheus_format PASSED
+tests/test_api.py::test_create_task PASSED
 tests/test_api.py::test_create_task_rejects_empty_title PASSED
-tests/test_api.py::test_complete_task PASSED
-tests/test_api.py::test_complete_missing_task_is_404 PASSED
-============================== 7 passed in 0.60s ===============================
+tests/test_api.py::test_list_tasks PASSED
+tests/test_api.py::test_get_single_task PASSED
+tests/test_api.py::test_get_missing_task_is_404 PASSED
+tests/test_api.py::test_update_task PASSED
+tests/test_api.py::test_update_missing_task_is_404 PASSED
+tests/test_api.py::test_delete_task PASSED
+tests/test_api.py::test_delete_missing_task_is_404 PASSED
+
+Name              Stmts   Miss  Cover
+app/config.py        18      1    94%
+app/db.py            21      2    90%
+app/main.py          76      4    95%
+app/models.py        12      0   100%
+app/schemas.py       20      0   100%
+TOTAL               147      7    95%
+
+======================== 12 passed in 0.09s =========================
+```
+
+**12 tests across 8 endpoints, 95% coverage.** `tests/conftest.py` points `DATABASE_URL` at a
+temporary **SQLite** file before the app imports its config, so tests never touch Postgres and
+need no running services. `pytest.ini` sets `pythonpath` and `testpaths`.
+
+---
+
+## M3 — Git and GitHub
+
+Public repository: **<https://github.com/hemangtk/DevOps>**. Commit messages describe what
+changed and why — including the honest ones, like the commit that records a flake8 failure I
+caused by running pytest but not lint after an edit.
+
+```console
+$ grep -E '\.env|__pycache__|node_modules|\.venv' .gitignore
+.env
+__pycache__/
+node_modules/
+.venv/
 ```
 
 ---
 
-## 4. Docker
+## M4 — Docker
 
-A multi-stage build that compiles dependency wheels in one stage and ships only the installed
-packages in the next, with a non-root user because the Kubernetes `securityContext` demands one:
-
-```dockerfile
-FROM python:3.12-slim AS build
-RUN pip wheel --wheel-dir /wheels -r requirements.txt
-
-FROM python:3.12-slim
-RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin taskboard
-COPY --from=build /wheels /wheels
-RUN pip install --no-index --find-links=/wheels -r requirements.txt && rm -rf /wheels
-USER 10001
-HEALTHCHECK CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')"
-```
+| | Backend | Frontend |
+|---|---|---|
+| Stages | wheels → runtime | **Node build → Nginx runtime** |
+| User | `uid 10001 appuser` | `uid 10002 web` |
+| Port | 8000 | 8080 (above 1024, required for non-root) |
+| Healthcheck | `/health` | `/healthz` |
+| Size | 364 MB | **76.2 MB** |
 
 ```console
-$ docker build -f docker/Dockerfile --build-arg APP_VERSION=1.0.0 -t taskboard:1.0.0 .
-REPOSITORY   TAG       SIZE
-taskboard    1.0.0     254MB
+$ docker compose exec backend id
+uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
+
+$ docker compose exec frontend id
+uid=10002(web) gid=10002(web) groups=10002(web)
 ```
+
+> **Non-root nginx needs three things**, and I hit all three: a port above 1024, a writable pid
+> path (the default `/run/nginx.pid` is root-owned — the container crashed with
+> `open() "/run/nginx.pid" failed (13: Permission denied)` until I moved it to `/tmp`), and
+> ownership of the dirs the entrypoint's `envsubst` writes into.
 
 ---
 
-## 5. Kubernetes deployment
+## M5 — CI/CD
+
+Six jobs: `test`, `frontend-build`, `security`, `images`, `manifests`, `gate`.
 
 ```console
-$ kubectl apply -f kubernetes/
-namespace/taskboard created
-configmap/taskboard-config created
-secret/taskboard-secret created
-persistentvolumeclaim/postgres-data created
-deployment.apps/postgres created
-service/postgres created
-deployment.apps/taskboard created
-service/taskboard created
-horizontalpodautoscaler.autoscaling/taskboard created
-ingress.networking.k8s.io/taskboard created
-networkpolicy.networking.k8s.io/postgres-allow-app-only created
-```
+$ gh run view 37648052047
+conclusion: success
 
-Everything running:
-
-```console
-$ kubectl get all,pvc,configmap,secret,ingress,hpa,networkpolicy -n taskboard
-pod/postgres-fbd8c8ff-tc8rs      1/1   Running
-pod/taskboard-659779dbc7-2xhzr   1/1   Running
-pod/taskboard-659779dbc7-r627x   1/1   Running
-service/postgres    ClusterIP   10.109.221.22    5432/TCP
-service/taskboard   ClusterIP   10.106.193.155   80/TCP
-deployment.apps/postgres    1/1
-deployment.apps/taskboard   2/2
-hpa/taskboard                Deployment/taskboard   cpu: <unknown>/60%   2   8   2
-pvc/postgres-data            Bound   pvc-f89c1dfb...   1Gi   RWO   standard
-configmap/taskboard-config   3
-secret/taskboard-secret      Opaque   2
-ingress/taskboard            nginx   taskboard.local   192.168.49.2   80
-networkpolicy/postgres-allow-app-only   app=postgres
-```
-
-### The init container sequenced the startup
-
-```console
-$ kubectl logs <pod> -c wait-for-postgres
-postgres:5432 - no response
-waiting for postgres...
-postgres:5432 - no response
-waiting for postgres...
-postgres:5432 - accepting connections
-postgres is ready
-```
-
-### ConfigMap and Secret reached the container
-
-```console
-$ kubectl exec <pod> -c api -- printenv ENVIRONMENT LOG_LEVEL POSTGRES_DB POSTGRES_USER
-production
-INFO
-taskboard
-taskboard
-
-$ kubectl exec <pod> -c api -- sh -c 'echo $DATABASE_URL | sed "s|:[^:@]*@|:***@|"'
-postgresql://taskboard:***@postgres:5432/taskboard
-```
-
-The password is never printed — the `DATABASE_URL` is assembled from a ConfigMap key and two
-Secret keys using `$(VAR)` interpolation.
-
-### Probes
-
-```console
-$ kubectl exec <pod> -c api -- curl -s localhost:8000/health
-{"status":"ok","uptime_s":2.2,"version":"1.0.0"}
-
-$ kubectl exec <pod> -c api -- curl -s localhost:8000/ready
-{"status":"ready","store":"postgres"}
-```
-
-`store: postgres` confirms the app is genuinely talking to the database, not falling back to its
-in-memory store.
-
-![full stack deployed](screenshots/deploy-full-stack.png)
-
----
-
-## 6. End to end, through the Ingress
-
-```console
-$ curl -X POST -H 'Host: taskboard.local' -d '{"title":"Finish the DevOps capstone"}' http://<node>/api/tasks
-{"done":false,"id":1,"title":"Finish the DevOps capstone"}
-{"done":false,"id":2,"title":"Submit the form"}
-{"done":false,"id":3,"title":"Tear down the cluster"}
-
-$ curl -H 'Host: taskboard.local' http://<node>/api/tasks
-{"tasks":[{"done":false,"id":1,...},{"done":false,"id":2,...},{"done":false,"id":3,...}]}
-
-$ curl -X POST -H 'Host: taskboard.local' http://<node>/api/tasks/1/complete
-{"done":true,"id":1,"title":"Finish the DevOps capstone"}
-```
-
-The rendered page:
-
-```html
-<h1>TaskBoard</h1>
-version 1.0.0
-<li class="done">#1 Finish the DevOps capstone</li>
-<li class="">#2 Submit the form</li>
-<li class="">#3 Tear down the cluster</li>
-```
-
-### Metrics
-
-```console
-$ curl -H 'Host: taskboard.local' http://<node>/metrics
-# HELP taskboard_requests_total Total HTTP requests served.
-# TYPE taskboard_requests_total counter
-taskboard_requests_total{version="1.0.0"} 14
-# TYPE taskboard_errors_total counter
-taskboard_errors_total{version="1.0.0"} 0
-# TYPE taskboard_uptime_seconds gauge
-taskboard_uptime_seconds 23.3
-# TYPE taskboard_tasks gauge
-taskboard_tasks 3
-```
-
-### Storage really persists
-
-```console
-$ kubectl get pods -l app=postgres
-postgres-fbd8c8ff-tc8rs   Running
-
-$ kubectl delete pod postgres-fbd8c8ff-tc8rs -n taskboard
-pod deleted
-
-$ kubectl get pods -l app=postgres
-postgres-fbd8c8ff-xptdq   Running          ← different pod
-
-$ curl -H 'Host: taskboard.local' http://<node>/api/tasks
-{"tasks":[{"done":true,"id":1,...},{"done":false,"id":2,...},{"done":false,"id":3,...}]}
-```
-
-**The database pod was destroyed and the data survived** — including task 1's completed state.
-That is the PVC doing its job.
-
-![end to end and persistence](screenshots/end-to-end-and-persistence.png)
-
----
-
-## 7. Troubleshooting challenge
-
-### Break 1 — wrong database password in the Secret
-
-```console
-$ kubectl patch secret taskboard-secret -p '{"stringData":{"POSTGRES_PASSWORD":"wrong-password"}}'
-$ kubectl rollout restart deployment/taskboard -n taskboard
-
-$ kubectl get pods -l app=taskboard
-taskboard-597fb5c658-zw8fd   0/1   CrashLoopBackOff   restarts=3    ← the new pod
-taskboard-659779dbc7-2xhzr   1/1   Running            restarts=0    ← old, still serving
-taskboard-659779dbc7-r627x   1/1   Running            restarts=0    ← old, still serving
-
-$ kubectl get events --field-selector reason=Unhealthy
-Startup probe failed: Get "http://10.244.0.101:8000/health": connect: connection refused
-
-$ kubectl get endpoints taskboard        # still the two OLD pods
-taskboard   10.244.0.98:8000,10.244.0.99:8000
-ingress -> HTTP 200                      # users never noticed
-```
-
-> **I expected this to produce "Running but not Ready" and it did not** — the app calls
-> `db.init()` before binding its port, so a bad password kills the process outright and the
-> **startup** probe fails with `connection refused`.
->
-> The more interesting result is what *didn't* happen: **the service never went down.**
-> `strategy.rollingUpdate.maxUnavailable: 0` means Kubernetes refuses to retire a healthy old
-> pod until a new one reports Ready. The broken pod never did, so the old ones kept serving and
-> the rollout simply stalled. A bad config became a stuck deployment instead of an outage.
-
-Fixing the Secret and restarting recovered cleanly, with the data intact.
-
-### Break 2 — the database disappears
-
-This is the one that isolates readiness from liveness:
-
-```console
-$ kubectl scale deployment/postgres -n taskboard --replicas=0
-deployment.apps/postgres scaled
-
-$ kubectl get pods
-taskboard-78c8988cfb-nn6dp   ready=0/1   Running   restarts=0
-taskboard-78c8988cfb-qtd7g   ready=0/1   Running   restarts=0
-```
-
-**Running. Not Ready. Zero restarts.** Asking both probe endpoints directly:
-
-```console
-GET /health ->  200 {"status":"ok","uptime_s":...,"version":"1.0.0"}
-GET /ready  ->  503 {"reason":"datastore unreachable","status":"not-ready"}
-
-$ kubectl get events --field-selector reason=Unhealthy
-10   Readiness probe failed: HTTP probe failed with statuscode: 503
-```
-
-The consequence:
-
-```console
-$ kubectl get endpoints taskboard
-taskboard   <empty>
-
-ingress -> HTTP 503          # no healthy backends
-restarts: 0                  # nothing was killed
-```
-
-And the recovery:
-
-```console
-$ kubectl scale deployment/postgres -n taskboard --replicas=1
-
-$ kubectl get pods
-postgres-fbd8c8ff-mkv96      ready=1/1   Running   restarts=0
-taskboard-78c8988cfb-nn6dp   ready=1/1   Running   restarts=0
-taskboard-78c8988cfb-qtd7g   ready=1/1   Running   restarts=0
-
-ingress -> HTTP 200
-{"tasks":[{"done":true,"id":1,...}, ...]}      # data intact
-```
-
-**The app recovered on its own with zero restarts.** Had `/health` checked the database, both
-pods would have been in `CrashLoopBackOff` instead — restarting repeatedly, losing warm state,
-and hammering the database the moment it came back. This is the single clearest demonstration in
-the whole coursework of why the two probes exist separately.
-
-![troubleshooting](screenshots/troubleshooting.png)
-
----
-
-## 8. CI/CD and DevSecOps
-
-[`.github/workflows/capstone.yml`](../.github/workflows/capstone.yml):
-
-```text
-test ─────┐
-security ─┼──► gate ──► (deploy)
-image ────┤
-manifests ┘
-```
-
-| Job | Does |
-|---|---|
-| **test** | flake8 + pytest with coverage |
-| **security** | bandit (SAST), pip-audit (SCA), gitleaks (secrets, full history) |
-| **image** | Build, smoke-test the running container, Trivy scan gating on fixable CRITICAL |
-| **manifests** | `kubeconform -strict` on the YAML, `helm lint` on the chart |
-| **gate** | Fails unless all four succeeded — deploy cannot run otherwise |
-
-```console
-$ gh run view 37642598222 --json jobs
-Build and test                 ->  success
-Security scans                 ->  success
+SAST, SCA and secret scan      ->  success
 Validate manifests and chart   ->  success
-Image build and scan           ->  success
+Lint and test (pytest)         ->  success
+Build the frontend             ->  success
+Build, scan and push both images -> success
 Release gate                   ->  success
 ```
 
-The security controls are inventoried in
-[`final-devops-project/security/README.md`](final-devops-project/security/), including an honest
-note about the one real gap: the Secret manifest is committed, which production would replace
-with Sealed Secrets or an external secret store.
-
----
-
-## 9. Helm and Terraform
+### Images pushed to GHCR, tagged by commit SHA
 
 ```console
-$ helm lint helm/taskboard
-1 chart(s) linted, 0 chart(s) failed
+Build backend    naming to ghcr.io/hemangtk/taskboard-backend:ab50046bb5d9
+Push both images ab50046bb5d9: digest: sha256:d59f3b6dfb75c5a9a3aa9f09e7db17ac6b49142f76feec31c7bd423bcc37351a
+                 ab50046bb5d9: digest: sha256:3ee4dc7a35bb654e396918b22e1d5b3851be0f2d6daaf991fb607c53431367f1
+pushed:
+  ghcr.io/hemangtk/taskboard-backend:ab50046bb5d9
+  ghcr.io/hemangtk/taskboard-frontend:ab50046bb5d9
 ```
 
-Terraform provisions an S3 artifact bucket with versioning and public access blocked, targeting
-LocalStack exactly as in [Session 18](../Terraform%20and%20IaC/) and
-[Session 19](../Cloud%20and%20Terraform%20in%20Action/).
+`ab50046bb5d9` is the 12-character commit SHA — **not `latest`**, so every image is traceable to
+the exact commit that produced it.
+
+![CI and GHCR](screenshots/ci-ghcr.png)
 
 ---
 
-## 10. GitOps
+## M6 — DevSecOps
 
-[`final-devops-project/gitops/argocd-application.yaml`](final-devops-project/gitops/) points
-ArgoCD at `Final DevOps Project/final-devops-project/kubernetes` in this repository, with
-`prune: true` and `selfHeal: true` — the same mechanism proven in
-[Session 20](../Monitoring%20Observability%20and%20GitOps/#task-3--gitops), where a manual scale
-was reverted in under a second.
+The gate runs Trivy against **both** images and fails on **fixable** HIGH or CRITICAL:
+
+```console
+--- gating ghcr.io/hemangtk/taskboard-backend ---
+--- gating ghcr.io/hemangtk/taskboard-frontend ---
+image scan gate: PASSED (no fixable HIGH/CRITICAL in either image)
+```
+
+### It passes because I fixed two real findings, not because I lowered the bar
+
+The first scan failed, legitimately:
+
+```console
+=== taskboard-backend:1.0.0 ===    fixable HIGH/CRITICAL: {'HIGH': 3}
+  HIGH  starlette  0.41.3  -> fixed in 1.3.1   (CVE-2026-54283)
+
+=== taskboard-frontend:1.0.0 ===   fixable HIGH/CRITICAL: {'HIGH': 42, 'CRITICAL': 2}
+  CRITICAL  libcrypto3  3.3.3-r0  -> fixed in 3.3.7-r0  (CVE-2026-31789)
+  CRITICAL  libssl3     3.3.3-r0  -> fixed in 3.3.7-r0  (CVE-2026-31789)
+  HIGH      c-ares      1.34.5-r0 -> fixed in 1.34.8-r0 (CVE-2026-33630)
+```
+
+**Backend:** FastAPI 0.115.5 pinned starlette `<0.42`, which carried three HIGH CVEs. Upgrading
+to FastAPI 0.142.2 brought starlette 1.7.0 — and all 12 tests still passed on the new version.
+
+**Frontend:** the published `nginx:1.27-alpine` tag lags Alpine's security updates. Adding
+`apk upgrade --no-cache` to the runtime stage pulled the patched OpenSSL and c-ares.
+
+```console
+=== after the fixes ===
+  taskboard-backend:1.0.0   fixable HIGH/CRITICAL: NONE    gate exit: 0
+  taskboard-frontend:1.0.0  fixable HIGH/CRITICAL: NONE    gate exit: 0
+```
+
+`--ignore-unfixed` is deliberate: a CVE with no available patch is information, not a decision.
+Gating on it only teaches people to route around the gate.
+
+Also in the pipeline: **bandit** (SAST), **pip-audit** (SCA) and **gitleaks** over full history.
 
 ---
 
-## 11. Reproduce
+## M7 — Terraform
+
+```console
+$ terraform validate
+Success! The configuration is valid.
+
+$ terraform plan
+  # aws_eks_cluster.main will be created
+  # aws_eks_node_group.main will be created
+  # aws_iam_role.cluster will be created
+  # aws_iam_role.node will be created
+  # aws_iam_role_policy_attachment.{cluster_policy,node_cni,node_registry,node_worker} will be created
+  # aws_internet_gateway.main will be created
+  # aws_route_table.public will be created
+  # aws_route_table_association.public[0] / [1] will be created
+  # aws_subnet.public[0] / [1] will be created
+  # aws_vpc.main will be created
+Plan: 15 to add, 0 to change, 0 to destroy.
+```
+
+### The network layer is genuinely provisioned and verified
+
+```console
+$ terraform apply -target=aws_vpc.main -target=aws_subnet.public ...
+Apply complete! Resources: 7 added, 0 changed, 0 destroyed.
+
+$ aws ec2 describe-subnets --filters Name=vpc-id,Values=vpc-3cdac269
+|  subnet-701286e7 |  10.30.1.0/24 |  ap-south-1a |  True |
+|  subnet-561c48af |  10.30.2.0/24 |  ap-south-1b |  True |
+```
+
+**Two public subnets in two different availability zones** — which is exactly what EKS requires —
+with the discovery tags EKS uses for load balancers:
+
+```console
+|  kubernetes.io/role/elb               |  1      |
+|  kubernetes.io/cluster/taskboard-eks  |  shared |
+```
+
+`terraform.tfvars.example` is committed; `terraform.tfvars` and `*.tfstate` are gitignored.
+
+> **Honest scope note:** this ran against **LocalStack**, whose free tier implements EC2/VPC but
+> **not EKS**. The cluster and node group are written, validated and planned, but not applied
+> here. Setting `use_localstack = false` targets real AWS with no other change — I did not do
+> that because an EKS control plane bills ~$0.10/hour plus node cost.
+
+![terraform](screenshots/terraform-vpc-eks.png)
+
+---
+
+## M8 — Kubernetes + Helm
+
+```console
+$ kubectl apply -f k8s/namespace.yaml
+namespace/taskboard created
+
+$ helm lint helm/taskboard                              # and -f values-dev / values-prod
+1 chart(s) linted, 0 chart(s) failed
+
+$ helm upgrade --install taskboard helm/taskboard -n taskboard --wait
+STATUS: deployed
+REVISION: 3
+```
+
+```console
+$ kubectl get deploy,svc,ingress,hpa,pvc -n taskboard
+deployment.apps/taskboard-taskboard-backend    2/2   2   2
+deployment.apps/taskboard-taskboard-frontend   2/2   2   2
+deployment.apps/taskboard-taskboard-postgres   1/1   1   1
+service/taskboard-taskboard-backend    ClusterIP   10.96.182.208    8000/TCP
+service/taskboard-taskboard-frontend   ClusterIP   10.108.46.184    8080/TCP
+service/taskboard-taskboard-postgres   ClusterIP   10.97.115.176    5432/TCP
+ingress/taskboard-taskboard            nginx   taskboard.local   192.168.49.2   80
+hpa/taskboard-taskboard-backend        Deployment/...-backend   2   8   2
+pvc/taskboard-taskboard-postgres-data  Bound   pvc-76e7a9c9-...   1Gi   RWO
+```
+
+**Backend and frontend both at 2 replicas**, all pods `Running`.
+
+### The chart migrates the database itself
+
+An init container runs Alembic before the app starts. To prove it, I dropped the schema and
+redeployed:
+
+```console
+$ kubectl exec <postgres> -- psql -c 'DROP TABLE tasks; DROP TABLE alembic_version;'
+DROP TABLE
+DROP TABLE
+
+$ helm upgrade --install taskboard helm/taskboard ...
+REVISION: 3
+
+$ kubectl get pod <backend> -o jsonpath='{.spec.initContainers[*].name}'
+wait-for-postgres run-migrations
+
+$ kubectl exec <postgres> -- psql -c '\dt'
+ public | alembic_version | table | taskboard
+ public | tasks           | table | taskboard
+```
+
+### Ingress splits `/` and `/api`
+
+```console
+--- GET /  -> the React SPA ---
+<!doctype html><html lang="en">...<title>TaskBoard</title>
+
+--- GET /api/tasks -> the FastAPI backend ---
+[]
+
+--- POST through the ingress ---
+{"id":1,"title":"Migrated by the chart","description":"alembic ran in an init container",...}
+```
+
+One host, one port, two applications — routed by path.
+
+> **A bug worth recording:** the backend pods first hung in `Init:0/1`. `pg_isready` was
+> returning *"no attempt"* — exit code 3, meaning invalid connection parameters, because I had
+> omitted `-U`. Without a username it could not even try. Adding `-U` fixed it. "no attempt" is
+> not "no response", and the distinction is the whole diagnosis.
+
+![helm deploy](screenshots/helm-deploy.png)
+
+---
+
+## M9 — Observability
+
+```console
+$ curl -s <backend>/metrics
+# HELP taskboard_http_requests_total Total HTTP requests served.
+# TYPE taskboard_http_requests_total counter
+taskboard_http_requests_total{version="1.0.0"} 7
+# TYPE taskboard_http_errors_total counter
+taskboard_http_errors_total{version="1.0.0"} 0
+# TYPE taskboard_request_latency_seconds gauge
+taskboard_request_latency_seconds 0.001966
+# TYPE taskboard_tasks_total gauge
+taskboard_tasks_total 2
+```
+
+### Prometheus is scraping the application
+
+Backend pods carry `prometheus.io/scrape`, `port` and `path` annotations; Prometheus discovers
+them with `kubernetes_sd_configs`.
+
+![prometheus targets](screenshots/prometheus-targets.png)
+
+```console
+$ query: taskboard_http_requests_total
+    taskboard-taskboard-backend-6f797db57d-h94mr   = 244
+    taskboard-taskboard-backend-6f797db57d-vnr27   = 243
+
+$ query: up{job="taskboard-pods"}
+    ...-h94mr = 1
+    ...-vnr27 = 1
+
+$ query: sum(rate(taskboard_http_requests_total[5m]))
+    0.1264 requests/sec
+```
+
+### Grafana, with live panels
+
+```console
+$ curl -s <grafana>/api/health
+{ "database": "ok", "version": "11.2.0" }
+
+$ curl -s '<grafana>/api/search?query=TaskBoard'
+    TaskBoard  (uid=taskboard, folder=TaskBoard)
+```
+
+![grafana dashboard](screenshots/grafana-dashboard.png)
+
+Six populated panels: **0.320 requests/sec**, **2 tasks stored**, **2 backend pods UP**,
+**0 errors**, plus request-rate and latency timeseries broken out per pod.
+
+Two deployment paths are provided: [`monitoring/prometheus-values.yaml`](taskboard/monitoring/)
+for `kube-prometheus-stack` in production, and
+[`monitoring/in-cluster-stack.yaml`](taskboard/monitoring/) — the lightweight equivalent actually
+used here, since the full stack is heavy for minikube.
+
+![monitoring](screenshots/monitoring.png)
+
+---
+
+## M10 — Documentation
+
+[`taskboard/README.md`](taskboard/README.md) explains what the application does, how to run it
+locally, how to test it, and how to deploy it.
+
+### Live demo
 
 ```bash
-minikube start --cpus=4 --memory=4096
-minikube addons enable ingress metrics-server default-storageclass
+# 1. change something
+vim "Final DevOps Project/taskboard/backend/app/main.py"
 
-cd final-devops-project
-docker build -f docker/Dockerfile --build-arg APP_VERSION=1.0.0 -t taskboard:1.0.0 .
-minikube image load taskboard:1.0.0
+# 2. commit and push
+git commit -am "feat: ..." && git push
 
-kubectl apply -f kubernetes/
-kubectl rollout status deployment/postgres  -n taskboard
-kubectl rollout status deployment/taskboard -n taskboard
+# 3. watch the pipeline
+gh run watch
 
-minikube ssh -- "curl -s -H 'Host: taskboard.local' http://localhost/api/tasks"
-
-# troubleshooting
-kubectl scale deployment/postgres -n taskboard --replicas=0    # watch readiness fail
-kubectl scale deployment/postgres -n taskboard --replicas=1    # watch it recover
-
-kubectl delete namespace taskboard
+# 4. the new image appears in GHCR tagged with this commit's SHA
+#    helm upgrade --install ... --set backend.image.tag=<sha>
 ```
 
 ---
 
-## 12. Lessons learned
+## Reproduce
 
-1. **The probe split is not academic.** Taking the database away produced `Running, 0/1 Ready,
-   0 restarts` and automatic recovery. A liveness probe that checked the database would have
-   turned a dependency outage into a cluster-wide restart loop.
-2. **`maxUnavailable: 0` saved a release.** A broken Secret produced a *stalled rollout* instead
-   of an outage, because Kubernetes would not retire healthy pods for one that never became
-   Ready.
-3. **Init containers make ordering explicit.** The app never saw a connection error at startup
-   because `wait-for-postgres` had already proven the database was accepting connections.
-4. **State is the thing that needs care.** Everything else in this stack is disposable; the PVC
-   is what made deleting the database pod a non-event.
-5. **Gates only matter if something downstream depends on them.** `needs: [gate]` is the line
-   that turns scanning into enforcement.
-6. **Writing the health endpoints is an application concern.** No amount of Kubernetes
-   configuration can fix an app that cannot say whether it is ready.
-7. **Verify at the layer you care about.** `kubectl get pods` showing `Running` meant very little;
-   `curl` through the Ingress returning real JSON from Postgres meant everything.
+```bash
+cd taskboard
+docker compose up --build            # http://localhost:8080
+
+cd backend && pytest --cov=app       # 12 tests
+
+minikube start --cpus=4 --memory=4096
+minikube addons enable ingress metrics-server default-storageclass
+kubectl apply -f k8s/namespace.yaml
+helm upgrade --install taskboard helm/taskboard -n taskboard --wait
+
+kubectl apply -f monitoring/grafana-dashboard.yaml -n monitoring
+kubectl apply -f monitoring/in-cluster-stack.yaml
+kubectl port-forward -n monitoring svc/grafana 3031:3000
+
+cd terraform && terraform init && terraform plan
+```
+
+---
+
+## Lessons learned
+
+1. **Read the rubric before building.** My first capstone followed the homework doc's generic
+   brief and scored roughly half of this one, because the rubric names specific technologies the
+   doc never mentions. The lesson is cheap to state and was expensive to learn.
+2. **A failing security gate is a prompt to fix, not to weaken.** Both scans failed on first run;
+   both were fixable in minutes with a dependency bump and an `apk upgrade`.
+3. **Run every CI step locally first.** The one time I skipped it — pytest after an edit but not
+   flake8 — cost a red pipeline over a 101-character line.
+4. **Non-root containers are mostly a filesystem-ownership problem**, not a user-creation one.
+5. **Error text rewards close reading.** `pg_isready` "no attempt" vs "no response" was the
+   entire diagnosis of a stalled rollout.
+6. **Separate liveness from readiness at the application layer.** No amount of YAML fixes an app
+   that cannot say whether it is ready.
