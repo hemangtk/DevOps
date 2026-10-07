@@ -1,0 +1,8 @@
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: stacks
+  labels:
+    app.kubernetes.io/name: stacks
+    app.kubernetes.io/managed-by: Helm

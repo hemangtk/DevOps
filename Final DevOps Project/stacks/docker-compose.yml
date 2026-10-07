@@ -1,0 +1,55 @@
+# Full local stack: postgres + backend + frontend.
+#   docker compose up --build
+# Name: Hemang | Enrollment number: 24bcs10209
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stacks-postgres
+    environment:
+      POSTGRES_USER: stacks
+      POSTGRES_PASSWORD: stacks
+      POSTGRES_DB: stacks
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stacks -d stacks"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      args: { APP_VERSION: "1.0.0-compose" }
+    container_name: stacks-backend
+    environment:
+      APP_VERSION: "1.0.0-compose"
+      ENVIRONMENT: "compose"
+      LOG_LEVEL: "INFO"
+      POSTGRES_USER: stacks
+      POSTGRES_PASSWORD: stacks
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: stacks
+    # run migrations, then serve
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports: ["8000:8000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: stacks-frontend
+    environment:
+      BACKEND_HOST: backend
+      BACKEND_PORT: "8000"
+    ports: ["3000:3000"]
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

@@ -1,0 +1,19 @@
+# Development overrides - smaller, cheaper, noisier logs.
+# Name: Hemang | Enrollment number: 24bcs10209
+environment: development
+logLevel: DEBUG
+
+backend:
+  replicaCount: 1
+  image: { tag: "dev" }
+  autoscaling: { enabled: false }
+
+frontend:
+  replicaCount: 1
+  image: { tag: "dev" }
+
+postgres:
+  persistence: { size: 512Mi }
+
+ingress:
+  host: stacks.dev.local

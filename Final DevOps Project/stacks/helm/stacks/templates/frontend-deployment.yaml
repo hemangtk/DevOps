@@ -1,0 +1,56 @@
+{{/* Name: Hemang | 24bcs10209 */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stacks.fullname" . }}-frontend
+  labels: {{- include "stacks.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.frontend.autoscaling.enabled }}
+  replicas: {{ .Values.frontend.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "stacks.frontend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "stacks.frontend.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports: [{ containerPort: {{ .Values.frontend.service.port }}, name: http }]
+          env:
+            # nginx proxies /api here, so the browser only ever sees one origin
+            - name: BACKEND_HOST
+              value: {{ include "stacks.fullname" . }}-backend
+            - name: BACKEND_PORT
+              value: {{ .Values.backend.service.port | quote }}
+          resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "stacks.fullname" . }}-frontend
+  labels: {{- include "stacks.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "stacks.frontend.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.frontend.service.port }}
+      targetPort: http

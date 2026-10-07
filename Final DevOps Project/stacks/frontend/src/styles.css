@@ -1,0 +1,123 @@
+/* Stacks - library lending UI.
+   Name: Hemang | Enrollment number: 24bcs10209 */
+:root {
+  --ink: #1b1a17;
+  --muted: #6d665c;
+  --paper: #f7f3ec;
+  --card: #fffdf9;
+  --line: #e2d9cb;
+  --ok: #2f7d53;
+  --warn: #a8701a;
+  --bad: #b03a2e;
+  --accent: #3a5a8c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.55 ui-serif, Georgia, 'Times New Roman', serif;
+}
+
+main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+
+header { border-bottom: 2px solid var(--line); padding-bottom: 16px; margin-bottom: 24px; }
+h1 { margin: 0; font-size: 2.4rem; letter-spacing: -0.02em; }
+.sub { margin: 4px 0 0; color: var(--muted); font-size: 0.92rem; }
+
+/* ---------------------------------------------------------------- stats */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.stat {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 12px;
+  text-align: center;
+}
+.stat .value { display: block; font-size: 1.9rem; font-weight: 700; line-height: 1.1; }
+.stat .label { display: block; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.stat.ok .value { color: var(--ok); }
+.stat.warn .value { color: var(--warn); }
+.stat.bad .value { color: var(--bad); }
+
+/* ------------------------------------------------------------------ add */
+.add { display: grid; grid-template-columns: 2fr 1.5fr 1.3fr auto; gap: 8px; margin-bottom: 20px; }
+input {
+  font: inherit;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  min-width: 0;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+button {
+  font: inherit;
+  padding: 9px 14px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) { filter: brightness(1.1); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.ghost { background: transparent; color: var(--muted); border-color: var(--line); }
+
+/* ---------------------------------------------------------------- books */
+.books { list-style: none; margin: 0; padding: 0; }
+.book {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--ok);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.book.overdue { border-left-color: var(--bad); }
+
+.meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.meta strong { font-size: 1.08rem; }
+.author { color: var(--muted); font-size: 0.9rem; }
+code { font-family: ui-monospace, Menlo, monospace; font-size: 0.78rem; color: var(--muted); }
+
+.loan { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.loan input { width: 140px; }
+.who { color: var(--muted); font-size: 0.86rem; }
+
+.badge {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.badge.ok { background: #e4f1e9; color: var(--ok); }
+.badge.warn { background: #f7eeda; color: var(--warn); }
+.badge.bad { background: #f8e3e0; color: var(--bad); }
+
+.error {
+  background: #f8e3e0;
+  border: 1px solid var(--bad);
+  color: var(--bad);
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+.empty { color: var(--muted); text-align: center; padding: 32px 0; }
+
+@media (max-width: 680px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .add { grid-template-columns: 1fr; }
+  .book { flex-direction: column; align-items: flex-start; }
+}

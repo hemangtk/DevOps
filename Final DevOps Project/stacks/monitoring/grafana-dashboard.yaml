@@ -1,0 +1,59 @@
+# A Grafana dashboard with live Stacks panels, shipped as a ConfigMap.
+#   kubectl apply -f monitoring/grafana-dashboard.yaml -n monitoring
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stacks-grafana-dashboard
+  labels:
+    grafana_dashboard: "1"
+data:
+  stacks.json: |
+    {
+      "title": "Stacks",
+      "uid": "stacks",
+      "timezone": "browser",
+      "refresh": "10s",
+      "time": { "from": "now-30m", "to": "now" },
+      "panels": [
+        {
+          "type": "stat", "title": "Requests / sec",
+          "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "sum(rate(stacks_http_requests_total[5m]))", "legendFormat": "rps" }
+          ]
+        },
+        {
+          "type": "stat", "title": "Tasks stored",
+          "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+          "targets": [ { "expr": "max(stacks_tasks_total)" } ]
+        },
+        {
+          "type": "stat", "title": "Backend pods UP",
+          "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+          "targets": [ { "expr": "sum(up{job=\"stacks-pods\"})" } ]
+        },
+        {
+          "type": "stat", "title": "Errors (5xx)",
+          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "targets": [ { "expr": "sum(stacks_http_errors_total)" } ]
+        },
+        {
+          "type": "timeseries", "title": "HTTP request rate",
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            { "expr": "sum by (pod) (rate(stacks_http_requests_total[2m]))",
+              "legendFormat": "{{pod}}" }
+          ]
+        },
+        {
+          "type": "timeseries", "title": "Average request latency",
+          "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            { "expr": "avg by (pod) (stacks_request_latency_seconds)",
+              "legendFormat": "{{pod}}" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s" } }
+        }
+      ]
+    }
