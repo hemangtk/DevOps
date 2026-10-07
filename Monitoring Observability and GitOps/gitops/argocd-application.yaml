@@ -1,0 +1,25 @@
+# The ArgoCD Application: "keep namespace gitops-demo matching this git path".
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-demo
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/hemangtk/DevOps.git
+    targetRevision: main
+    path: Monitoring Observability and GitOps/gitops
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops-demo
+
+  syncPolicy:
+    automated:
+      prune: true        # delete resources removed from git
+      selfHeal: true     # revert manual changes made in the cluster
+    syncOptions:
+      - CreateNamespace=true
