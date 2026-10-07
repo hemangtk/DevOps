@@ -1,287 +1,326 @@
-# Final DevOps Project — TaskBoard
+# Final DevOps Project — Stacks
 
 **Name:** Hemang
 **Enrollment number:** 24bcs10209
 
-Session 21 capstone, built against the course's
-[`session21-python/GRADING.md`](https://github.com/Nency-Ravaliya/devops-heros/tree/main/session21-python)
-rubric — a React + FastAPI + PostgreSQL application taken from source to a scanned image in
-GHCR to a running, autoscaling, monitored Kubernetes deployment.
+**Stacks** is a small library lending desk: a catalogue of physical copies, each either on the
+shelf or on loan, with a due date that quietly turns a loan overdue. The application is
+deliberately modest; the point of this project is everything around it — a commit becoming a
+scanned image in a registry becoming a running, autoscaling, monitored Kubernetes deployment.
 
-**Live proof:** [pipeline run #37648052047](https://github.com/hemangtk/DevOps/actions/runs/37648052047)
-— all 6 jobs green, both images pushed to GHCR.
+Source: [`stacks/`](stacks/) · Pipeline:
+[`.github/workflows/stacks.yml`](../.github/workflows/stacks.yml)
 
-Project: [`taskboard/`](taskboard/) · Pipeline: [`.github/workflows/taskboard.yml`](../.github/workflows/taskboard.yml)
+> **On the domain.** The course's `GRADING.md` requires the application domain to be the
+> student's own and scores a direct clone of the TaskBoard reference project zero across every
+> module. Lending is therefore a different problem from task tracking: a copy has a *borrower*
+> and a *due date*, "overdue" is a function of time rather than a status somebody sets, and the
+> interesting rules are about what you may not do — you cannot lend a copy twice, and you cannot
+> withdraw one that is out. The DevOps layer follows the same architecture, which `GRADING.md`
+> explicitly permits.
 
 ---
 
 ## Rubric coverage
 
-| Module | Requirement | Evidence |
+| Module | | Evidence |
 |---|---|---|
-| **M1** Application | FastAPI, Alembic, React frontend, compose | [§1](#m1--application) |
-| **M2** Testing | pytest, 5+ tests, test DB not prod | [§2](#m2--testing) |
-| **M3** Git | Public repo, commit messages, `.gitignore` | [§3](#m3--git-and-github) |
-| **M4** Docker | Both Dockerfiles, multi-stage, non-root, compose | [§4](#m4--docker) |
-| **M5** CI/CD | pytest, frontend build, both images, GHCR, SHA tags | [§5](#m5--cicd) |
-| **M6** DevSecOps | Trivy on both images, gate on HIGH/CRITICAL | [§6](#m6--devsecops) |
-| **M7** Terraform | VPC + 2 public subnets, EKS + node group | [§7](#m7--terraform) |
-| **M8** Kubernetes + Helm | Chart deploys both tiers, ingress split, 2 replicas | [§8](#m8--kubernetes--helm) |
-| **M9** Observability | `/metrics`, Prometheus scraping, Grafana panel | [§9](#m9--observability) |
-| **M10** Documentation | Project README, demo | [§10](#m10--documentation) |
+| **M1** | Application | [below](#m1--application) · 6 endpoints, Alembic migration, React UI |
+| **M2** | Testing | [below](#m2--testing) · 20 tests, 95% coverage, SQLite not Postgres |
+| **M3** | Git and GitHub | [below](#m3--git-and-github) · public repo, 36 commits, `.gitignore` |
+| **M4** | Docker | [below](#m4--docker) · multi-stage, **both images non-root** |
+| **M5** | CI/CD | [below](#m5--cicd) · 6 gated jobs, GHCR, SHA tags |
+| **M6** | DevSecOps | [below](#m6--devsecops) · Trivy on both images, fixable-only gate |
+| **M7** | Terraform | [below](#m7--terraform) · VPC + 2 public subnets; **EKS caveat stated** |
+| **M8** | Kubernetes + Helm | [below](#m8--kubernetes--helm) · 2+2 replicas, Ingress, HPA, PVC |
+| **M9** | Observability | [below](#m9--observability) · Prometheus scraping, Grafana populated |
+| **M10** | Documentation | this file, and the live-demo loop at the end |
 
 ---
 
 ## Architecture
 
 ```text
-Developer ──push──► GitHub ──► Actions
-                       │  ├── flake8 + pytest (12 tests, 95%)
-                       │  ├── vite build
-                       │  ├── bandit / pip-audit / gitleaks
-                       │  ├── build both images → smoke test → Trivy gate
-                       │  ├── push to GHCR, tagged <commit-sha>
-                       │  └── kubeconform + helm lint + terraform validate
-                       ▼
-          ┌──────── Kubernetes namespace: taskboard ────────┐
-          │  Ingress  taskboard.local                       │
-          │     /  ──────────────► frontend Svc ──► 2 pods  │
-          │     /api ────────────► backend  Svc ──► 2 pods  │ HPA 2→8 @60%
-          │                              │                  │
-          │                        postgres Svc ──► 1 pod   │
-          │                              └── PVC 1Gi        │
-          └─────────────────────────────────────────────────┘
-                       ▲ scrape /metrics
-          Prometheus ──┘  ──► Grafana dashboard
+                 Browser
+                    │  :3000
+          ┌─────────▼──────────┐
+          │  React SPA (nginx) │   one origin — nginx proxies /api,
+          │  non-root, uid 10002│   so there is no CORS in production
+          └─────────┬──────────┘
+                    │ /api
+          ┌─────────▼──────────┐      ┌──────────────────┐
+          │  FastAPI backend   ├─────►│  PostgreSQL 16   │
+          │  non-root, uid 10001│      │  PVC-backed      │
+          │  /health /ready    │      └──────────────────┘
+          │  /metrics          │
+          └────────────────────┘
 ```
+
+### The API
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | **Liveness.** Process only — never touches the database |
+| `GET` | `/ready` | **Readiness.** *Does* check the database |
+| `GET` | `/metrics` | Prometheus exposition format |
+| `GET` | `/api/books` | The catalogue |
+| `POST` | `/api/books` | Shelve a copy |
+| `GET` | `/api/books/stats` | Shelf summary |
+| `GET` | `/api/books/{id}` | One copy |
+| `PUT` | `/api/books/{id}` | Correct the record, **or lend / return** |
+| `DELETE` | `/api/books/{id}` | Withdraw a copy |
+
+> **Why `/health` must not touch the database.** If it did, a slow database would fail liveness
+> on every pod at once, Kubernetes would restart them all, and the reconnect storm would deepen
+> the outage. `/ready` checks the database so an unhealthy pod leaves the Service endpoints
+> *without* being restarted.
 
 ---
 
 ## M1 — Application
 
-**FastAPI backend, SQLAlchemy models, Pydantic schemas, Alembic migrations, React/Vite frontend,
-PostgreSQL** — all three running under `docker compose up --build`.
-
 ```console
 $ docker compose up --build
-$ docker compose ps
-SERVICE    STATUS                        PORTS
-backend    Up 23 seconds (healthy)       0.0.0.0:8000->8000/tcp
-frontend   Up 23 seconds (healthy)       0.0.0.0:8080->8080/tcp
-postgres   Up About a minute (healthy)   5432/tcp
+ Container stacks-postgres  Healthy
+ Container stacks-backend   Started
+ Container stacks-frontend  Started
+
+NAME              STATUS                   PORTS
+stacks-backend    Up (health: starting)    0.0.0.0:8000->8000/tcp
+stacks-frontend   Up (health: starting)    0.0.0.0:3000->3000/tcp
+stacks-postgres   Up (healthy)             5432/tcp
 ```
+
+`depends_on: {condition: service_healthy}` with a `pg_isready` healthcheck — not a bare
+`depends_on`, which only waits for the *container* to start and lets `alembic upgrade head` run
+against a database that is not listening yet.
+
+### Validation that actually rejects things
+
+```console
+$ POST /api/books  {"isbn": "978-0-13-595705-9", ...}
+  "isbn": "9780135957059"                        ← hyphens normalised away
+
+$ POST the same ISBN again
+  HTTP 409  isbn 9780135957059 is already shelved
+
+$ POST {"title": ""}
+  string_too_short  String should have at least 1 character
+
+$ POST {"isbn": "12345-not-isbn"}
+  Value error, isbn must be a valid ISBN-10 or ISBN-13
+```
+
+The duplicate is caught by a **`UNIQUE` constraint in the migration**, not only by a check in the
+handler — a second writer racing the first cannot slip one past the API.
+
+### Lending, and the rules that say no
+
+```console
+$ PUT /api/books/1  {"state": "BORROWED", "borrower": "Hemang"}
+  "state": "BORROWED", "borrower": "Hemang", "due_date": "2026-10-21"
+                                              ↑ no due date was sent: the 14-day
+                                                default loan period was applied
+
+$ PUT /api/books/1  {"state": "BORROWED", "borrower": "Asha"}   → HTTP 409  already on loan
+$ DELETE /api/books/1                                            → HTTP 409  cannot withdraw
+```
+
+### Overdue is derived, not stored
+
+```console
+$ PUT /api/books/2  {"state": "BORROWED", "borrower": "Asha", "due_date": "2026-10-06"}
+  state=BORROWED  due=2026-10-06  overdue=True
+```
+
+**The state is still `BORROWED`.** There is no `OVERDUE` value to set and no job to run —
+`overdue` is computed from `due_date` every time the record is read, so a loan becomes overdue
+by the passage of time. Storing it would mean the data is wrong at midnight until something
+remembers to fix it.
+
+```console
+$ GET /api/books/stats
+{ "total": 3, "available": 1, "borrowed": 2, "overdue": 1 }
+```
+
+`overdue` is a **subset of `borrowed`**, not a fourth state — which is why the numbers do not
+sum to the total.
+
+![docker compose and the API](screenshots/compose-stack.png)
+
+![loans, stats and metrics](screenshots/api-loans-and-metrics.png)
 
 ### Alembic really migrates
 
-```console
-$ docker compose logs backend | grep -i alembic
-INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
-INFO  [alembic.runtime.migration] Running upgrade  -> 0001, create tasks table
-
-$ docker compose exec postgres psql -U taskboard -d taskboard -c '\dt'
- Schema |      Name       | Type  |   Owner
---------+-----------------+-------+-----------
- public | alembic_version | table | taskboard
- public | tasks           | table | taskboard
-
-$ docker compose exec postgres psql -U taskboard -d taskboard -c 'SELECT version_num FROM alembic_version;'
- 0001
-```
-
-### Eight endpoints, all exercised
+Proof from inside the cluster, after the chart's init container ran:
 
 ```console
-$ curl -s localhost:8000/health
-{"status":"ok","version":"1.0.0-compose","environment":"compose"}
+$ psql -c "select column_name||' : '||data_type from information_schema.columns
+           where table_name='books' order by ordinal_position"
+id : integer
+title : character varying
+author : character varying
+isbn : character varying
+state : character varying
+borrower : character varying
+due_date : date
+created_at : timestamp with time zone
 
-$ curl -s localhost:8000/ready
-{"status":"ready","database":"reachable"}
+$ psql -c "select indexname from pg_indexes where tablename='books'"
+books_pkey
+ix_books_id
+uq_books_isbn          ← the unique constraint
+ix_books_isbn
 
---- POST ---
-{"id":1,"title":"Build the capstone to spec","description":"all 10 modules","done":false,...}
-
---- GET list ---
-[{"id":1,...},{"id":2,...}]
-
---- GET one ---
-{"id":1,"title":"Build the capstone to spec",...}
-
---- PUT ---
-{"id":1,...,"done":true,...}
-
---- DELETE ---
-DELETE /api/tasks/2 -> HTTP 204
+$ psql -c "select version_num from alembic_version"
+0001
 ```
 
-### The frontend renders and calls the API
+### The frontend
 
-```console
-$ curl -s localhost:8080/ | head -c 200
-<!doctype html><html lang="en"><head>...<title>TaskBoard</title>
-<script type="module" crossorigin src="/assets/index-CegQPomn.js">
+![the Stacks UI](screenshots/frontend-ui.png)
 
-$ curl -s localhost:8080/api/tasks        # nginx proxies /api to the backend
-[{"id":1,"title":"Build the capstone to spec",...}]
-```
-
-![the running application](screenshots/frontend-ui.png)
-
-Task #1 is struck through (`done: true`), #3 is open — real data from the API, with working
-Add / Done / Delete controls.
-
-![compose stack](screenshots/compose-stack.png)
+Shelf counts across the top, then one row per copy. The overdue copy carries a red left border
+and badge. The screenshot was taken **after lending a book through the browser** — the counts
+moved 2/1 → 1/2 and the due date appeared, so the SPA is genuinely talking to the API.
 
 ---
 
 ## M2 — Testing
 
 ```console
-$ pytest --cov=app
-tests/test_api.py::test_health_returns_ok PASSED
-tests/test_api.py::test_ready_reports_database_reachable PASSED
-tests/test_api.py::test_metrics_is_prometheus_format PASSED
-tests/test_api.py::test_create_task PASSED
-tests/test_api.py::test_create_task_rejects_empty_title PASSED
-tests/test_api.py::test_list_tasks PASSED
-tests/test_api.py::test_get_single_task PASSED
-tests/test_api.py::test_get_missing_task_is_404 PASSED
-tests/test_api.py::test_update_task PASSED
-tests/test_api.py::test_update_missing_task_is_404 PASSED
-tests/test_api.py::test_delete_task PASSED
-tests/test_api.py::test_delete_missing_task_is_404 PASSED
+$ pytest -v --cov=app
+20 passed in 0.15s
 
 Name              Stmts   Miss  Cover
-app/config.py        18      1    94%
+app/config.py        19      1    95%
 app/db.py            21      2    90%
-app/main.py          76      4    95%
-app/models.py        12      0   100%
-app/schemas.py       20      0   100%
-TOTAL               147      7    95%
-
-======================== 12 passed in 0.09s =========================
+app/main.py         108      7    94%
+app/models.py        18      0   100%
+app/schemas.py       45      0   100%
+TOTAL               211     10    95%
 ```
 
-**12 tests across 8 endpoints, 95% coverage.** `tests/conftest.py` points `DATABASE_URL` at a
-temporary **SQLite** file before the app imports its config, so tests never touch Postgres and
-need no running services. `pytest.ini` sets `pythonpath` and `testpaths`.
+The tests cover every endpoint and, more usefully, the rules: hyphen normalisation, the duplicate
+ISBN 409, lending without a borrower, double-lending, withdrawing a copy that is out, and the
+derived `overdue` flag.
+
+Two are there to pin bugs rather than features:
+
+```python
+def test_stats_route_is_not_shadowed_by_the_id_route(client):
+    """/api/books/stats must not be parsed as /api/books/{book_id}."""
+
+def test_probe_503s_are_not_counted_as_application_errors(client, monkeypatch):
+    """A readiness 503 during startup must not page anyone."""
+```
+
+`conftest.py` sets `DATABASE_URL` to a temporary **SQLite** file *before* the app imports its
+config, and drops and recreates the schema per test — so the suite never reaches Postgres and
+needs no running services.
+
+![pytest](screenshots/pytest.png)
 
 ---
 
 ## M3 — Git and GitHub
 
-Public repository: **<https://github.com/hemangtk/DevOps>**. Commit messages describe what
-changed and why — including the honest ones, like the commit that records a flake8 failure I
-caused by running pytest but not lint after an edit.
-
-```console
-$ grep -E '\.env|__pycache__|node_modules|\.venv' .gitignore
-.env
-__pycache__/
-node_modules/
-.venv/
-```
+Public at **<https://github.com/hemangtk/DevOps>**, 36 commits, each describing what changed and
+why. `.gitignore` excludes `.env`, `__pycache__`, `node_modules`, `.venv`, `.terraform/`,
+`*.tfstate` and `terraform.tfvars`; only `.env.example` and `terraform.tfvars.example` are
+committed. gitleaks scans the full history on every push and is one of the gate's inputs.
 
 ---
 
 ## M4 — Docker
 
-| | Backend | Frontend |
-|---|---|---|
-| Stages | wheels → runtime | **Node build → Nginx runtime** |
-| User | `uid 10001 appuser` | `uid 10002 web` |
-| Port | 8000 | 8080 (above 1024, required for non-root) |
-| Healthcheck | `/health` | `/healthz` |
-| Size | 364 MB | **76.2 MB** |
+Both images are **multi-stage** and both run as a **non-root user**:
+
+| | Build stage | Runtime | User |
+|---|---|---|---|
+| backend | `python:3.12-slim` builds wheels | `python:3.12-slim` installs from `/wheels` | `uid 10001` |
+| frontend | `node:22-alpine` runs `vite build` | `nginx:1.27-alpine` serves `dist/` | `uid 10002` |
 
 ```console
-$ docker compose exec backend id
-uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
+$ docker run --rm --entrypoint sh ghcr.io/hemangtk/stacks-backend:5ecafd5b515b -c 'id'
+uid=10001(appuser) gid=10001(appuser)
 
-$ docker compose exec frontend id
-uid=10002(web) gid=10002(web) groups=10002(web)
+$ docker run --rm --entrypoint sh ghcr.io/hemangtk/stacks-frontend:5ecafd5b515b -c 'id'
+uid=10002(web) gid=10002(web)
 ```
 
-> **Non-root nginx needs three things**, and I hit all three: a port above 1024, a writable pid
-> path (the default `/run/nginx.pid` is root-owned — the container crashed with
-> `open() "/run/nginx.pid" failed (13: Permission denied)` until I moved it to `/tmp`), and
-> ownership of the dirs the entrypoint's `envsubst` writes into.
+**Unprivileged nginx needs three fixes**, and missing any one of them crashes the container:
+
+```dockerfile
+RUN apk upgrade --no-cache          # the published tag lags Alpine's OpenSSL fixes
+RUN addgroup -g 10002 -S web && adduser -u 10002 -S web -G web \
+ && sed -i 's|^pid .*|pid /tmp/nginx.pid;|' /etc/nginx/nginx.conf \
+ && sed -i '/^user /d' /etc/nginx/nginx.conf \
+ && chown -R web:web /var/cache/nginx /usr/share/nginx/html /etc/nginx/conf.d
+```
+
+a port above 1024, a writable pid path (`/run/nginx.pid` is root-owned), and ownership of the
+directories the entrypoint's `envsubst` step writes into.
 
 ---
 
 ## M5 — CI/CD
 
-Six jobs: `test`, `frontend-build`, `security`, `images`, `manifests`, `gate`.
+Six jobs, and the dependency edges are the point:
 
-```console
-$ gh run view 37648052047
-conclusion: success
-
-SAST, SCA and secret scan      ->  success
-Validate manifests and chart   ->  success
-Lint and test (pytest)         ->  success
-Build the frontend             ->  success
-Build, scan and push both images -> success
-Release gate                   ->  success
+```text
+  Lint and test (pytest) ─┐
+  Build the frontend ─────┼──► Build, scan and push both images ──► Release gate
+  SAST, SCA, secret scan ─┤                                           ▲
+  Validate manifests ─────┴───────────────────────────────────────────┘
 ```
 
-### Images pushed to GHCR, tagged by commit SHA
-
 ```console
-Build backend    naming to ghcr.io/hemangtk/taskboard-backend:ab50046bb5d9
-Push both images ab50046bb5d9: digest: sha256:d59f3b6dfb75c5a9a3aa9f09e7db17ac6b49142f76feec31c7bd423bcc37351a
-                 ab50046bb5d9: digest: sha256:3ee4dc7a35bb654e396918b22e1d5b3851be0f2d6daaf991fb607c53431367f1
-pushed:
-  ghcr.io/hemangtk/taskboard-backend:ab50046bb5d9
-  ghcr.io/hemangtk/taskboard-frontend:ab50046bb5d9
+$ gh run view 37661812588
+Session 21: do not count readiness 503s as application errors  sha=5ecafd5b515b  success
+  success  Lint and test (pytest)        success  Build, scan and push both images
+  success  Build the frontend            success  Release gate
+  success  SAST, SCA and secret scan     success  Validate manifests and chart
 ```
 
-`ab50046bb5d9` is the 12-character commit SHA — **not `latest`**, so every image is traceable to
-the exact commit that produced it.
+### Images in GHCR, tagged by commit SHA
 
-![CI and GHCR](screenshots/ci-ghcr.png)
+Pulled back **from a different machine than the one that built them**:
+
+```console
+$ docker pull ghcr.io/hemangtk/stacks-backend:5ecafd5b515b
+Digest: sha256:6e26bb95e52656fbb7dd5a27c0b892297c0368a0c78c34b51eade53feb6188f3
+
+$ docker pull ghcr.io/hemangtk/stacks-frontend:5ecafd5b515b
+Digest: sha256:7e2ed9a4e257288756c1b5a184ff587041082426baaf1450694a655a35cb8059
+```
+
+The tag is the 12-character commit SHA, never `latest`. `latest` cannot answer *"what is running
+in production"*, which makes both incident response and rollback guesswork.
+
+![the pipeline, GHCR and Trivy](screenshots/ci-ghcr.png)
 
 ---
 
 ## M6 — DevSecOps
 
-The gate runs Trivy against **both** images and fails on **fixable** HIGH or CRITICAL:
+Trivy scans **both** images inside the pipeline, and the push job is downstream of the scan — so
+an image that fails cannot reach the registry.
 
 ```console
---- gating ghcr.io/hemangtk/taskboard-backend ---
---- gating ghcr.io/hemangtk/taskboard-frontend ---
-image scan gate: PASSED (no fixable HIGH/CRITICAL in either image)
+$ trivy image --severity HIGH,CRITICAL --ignore-unfixed ghcr.io/hemangtk/stacks-backend:5ecafd5b515b
+  fixable HIGH/CRITICAL: 0
+$ trivy image --severity HIGH,CRITICAL --ignore-unfixed ghcr.io/hemangtk/stacks-frontend:5ecafd5b515b
+  fixable HIGH/CRITICAL: 0
 ```
 
-### It passes because I fixed two real findings, not because I lowered the bar
+**On the clean result:** this is not an unscanned image. The frontend is clean *because* of
+`apk upgrade --no-cache` in its Dockerfile — the published `nginx:1.27-alpine` tag ships OpenSSL
+and c-ares packages that Alpine has already patched, and without that line the same scan reports
+dozens of fixable HIGH findings.
 
-The first scan failed, legitimately:
-
-```console
-=== taskboard-backend:1.0.0 ===    fixable HIGH/CRITICAL: {'HIGH': 3}
-  HIGH  starlette  0.41.3  -> fixed in 1.3.1   (CVE-2026-54283)
-
-=== taskboard-frontend:1.0.0 ===   fixable HIGH/CRITICAL: {'HIGH': 42, 'CRITICAL': 2}
-  CRITICAL  libcrypto3  3.3.3-r0  -> fixed in 3.3.7-r0  (CVE-2026-31789)
-  CRITICAL  libssl3     3.3.3-r0  -> fixed in 3.3.7-r0  (CVE-2026-31789)
-  HIGH      c-ares      1.34.5-r0 -> fixed in 1.34.8-r0 (CVE-2026-33630)
-```
-
-**Backend:** FastAPI 0.115.5 pinned starlette `<0.42`, which carried three HIGH CVEs. Upgrading
-to FastAPI 0.142.2 brought starlette 1.7.0 — and all 12 tests still passed on the new version.
-
-**Frontend:** the published `nginx:1.27-alpine` tag lags Alpine's security updates. Adding
-`apk upgrade --no-cache` to the runtime stage pulled the patched OpenSSL and c-ares.
-
-```console
-=== after the fixes ===
-  taskboard-backend:1.0.0   fixable HIGH/CRITICAL: NONE    gate exit: 0
-  taskboard-frontend:1.0.0  fixable HIGH/CRITICAL: NONE    gate exit: 0
-```
-
-`--ignore-unfixed` is deliberate: a CVE with no available patch is information, not a decision.
-Gating on it only teaches people to route around the gate.
-
-Also in the pipeline: **bandit** (SAST), **pip-audit** (SCA) and **gitleaks** over full history.
+`--ignore-unfixed` is deliberate. A CVE with no available fix is information; a *fixable* one is
+a decision. Gating on findings nobody can act on produces a gate people route around.
 
 ---
 
@@ -294,236 +333,273 @@ Success! The configuration is valid.
 $ terraform plan
   # aws_eks_cluster.main will be created
   # aws_eks_node_group.main will be created
-  # aws_iam_role.cluster will be created
-  # aws_iam_role.node will be created
-  # aws_iam_role_policy_attachment.{cluster_policy,node_cni,node_registry,node_worker} will be created
-  # aws_internet_gateway.main will be created
-  # aws_route_table.public will be created
-  # aws_route_table_association.public[0] / [1] will be created
-  # aws_subnet.public[0] / [1] will be created
-  # aws_vpc.main will be created
+  # aws_iam_role.cluster / .node  (+ 4 policy attachments)
+  # aws_internet_gateway.main
+  # aws_route_table.public  +  aws_route_table_association.public[0,1]
+  # aws_subnet.public[0]  +  aws_subnet.public[1]
+  # aws_vpc.main
 Plan: 15 to add, 0 to change, 0 to destroy.
 ```
 
-### The network layer is genuinely provisioned and verified
+### What is actually provisioned
 
 ```console
-$ terraform apply -target=aws_vpc.main -target=aws_subnet.public ...
-Apply complete! Resources: 7 added, 0 changed, 0 destroyed.
+$ aws ec2 describe-vpcs --filters Name=cidr,Values=10.30.0.0/16
+|  vpc-d38d9a95 |  10.30.0.0/16  |  available  |
 
-$ aws ec2 describe-subnets --filters Name=vpc-id,Values=vpc-3cdac269
-|  subnet-701286e7 |  10.30.1.0/24 |  ap-south-1a |  True |
-|  subnet-561c48af |  10.30.2.0/24 |  ap-south-1b |  True |
+$ aws ec2 describe-subnets
+|  subnet-c6c6dc65 |  10.30.1.0/24 |  ap-south-1a |  True |
+|  subnet-a01468b7 |  10.30.2.0/24 |  ap-south-1b |  True |   ← two AZs, both public
+
+$ aws ec2 describe-route-tables
+|  0.0.0.0/0    |  igw-522c1d80  |   ← what makes them public
 ```
 
-**Two public subnets in two different availability zones** — which is exactly what EKS requires —
-with the discovery tags EKS uses for load balancers:
+The subnets carry the tags EKS needs before it will place load balancers:
 
 ```console
-|  kubernetes.io/role/elb               |  1      |
-|  kubernetes.io/cluster/taskboard-eks  |  shared |
+|  kubernetes.io/role/elb           |  1          |
+|  kubernetes.io/cluster/stacks-eks |  shared     |
 ```
 
-`terraform.tfvars.example` is committed; `terraform.tfvars` and `*.tfstate` are gitignored.
+### The EKS gap, stated plainly
 
-> **Honest scope note:** this ran against **LocalStack**, whose free tier implements EC2/VPC but
-> **not EKS**. The cluster and node group are written, validated and planned, but not applied
-> here. Setting `use_localstack = false` targets real AWS with no other change — I did not do
-> that because an EKS control plane bills ~$0.10/hour plus node cost.
+```console
+$ terraform apply
+aws_eks_cluster.main: Creating...
 
-![terraform](screenshots/terraform-vpc-eks.png)
+Error: creating EKS Cluster (stacks-eks): StatusCode: 501,
+api error InternalFailure: API for service 'eks' not yet implemented or pro feature
+```
+
+**13 of the 15 planned resources are real; the two EKS resources are not.** This runs against
+**LocalStack**, whose free tier does not implement EKS — there is no AWS account behind this
+project and nothing billable. The HCL is the same configuration that would run against real AWS;
+what is missing is an account, not correctness. I have not claimed a running cluster, and the
+`terraform state list` above shows exactly which resources exist.
+
+```console
+$ terraform destroy
+Destroy complete! Resources: 13 destroyed.
+
+$ aws ec2 describe-vpcs --filters Name=cidr,Values=10.30.0.0/16
+                                           ← empty
+```
+
+![terraform plan, apply and verification](screenshots/terraform-vpc-eks.png)
+
+![state, the EKS gap and destroy](screenshots/terraform-state-destroy.png)
 
 ---
 
 ## M8 — Kubernetes + Helm
 
 ```console
-$ kubectl apply -f k8s/namespace.yaml
-namespace/taskboard created
+$ helm upgrade --install stacks helm/stacks -n stacks --wait
+NAME: stacks   NAMESPACE: stacks   STATUS: deployed   REVISION: 1
 
-$ helm lint helm/taskboard                              # and -f values-dev / values-prod
-1 chart(s) linted, 0 chart(s) failed
+$ kubectl get pods -n stacks
+stacks-backend-7fd5ccdf97-dbh6k    1/1   Running
+stacks-backend-7fd5ccdf97-w85cn    1/1   Running      ← 2 replicas
+stacks-frontend-5b9745d48d-8v7zh   1/1   Running
+stacks-frontend-5b9745d48d-gghks   1/1   Running      ← 2 replicas
+stacks-postgres-6c9f67cb94-cgbpq   1/1   Running
 
-$ helm upgrade --install taskboard helm/taskboard -n taskboard --wait
-STATUS: deployed
-REVISION: 3
+$ kubectl get svc -n stacks
+stacks-backend    ClusterIP   10.110.54.219    8000/TCP
+stacks-frontend   ClusterIP   10.101.253.181   3000/TCP
+stacks-postgres   ClusterIP   10.111.74.54     5432/TCP
 ```
-
-```console
-$ kubectl get deploy,svc,ingress,hpa,pvc -n taskboard
-deployment.apps/taskboard-taskboard-backend    2/2   2   2
-deployment.apps/taskboard-taskboard-frontend   2/2   2   2
-deployment.apps/taskboard-taskboard-postgres   1/1   1   1
-service/taskboard-taskboard-backend    ClusterIP   10.96.182.208    8000/TCP
-service/taskboard-taskboard-frontend   ClusterIP   10.108.46.184    8080/TCP
-service/taskboard-taskboard-postgres   ClusterIP   10.97.115.176    5432/TCP
-ingress/taskboard-taskboard            nginx   taskboard.local   192.168.49.2   80
-hpa/taskboard-taskboard-backend        Deployment/...-backend   2   8   2
-pvc/taskboard-taskboard-postgres-data  Bound   pvc-76e7a9c9-...   1Gi   RWO
-```
-
-**Backend and frontend both at 2 replicas**, all pods `Running`.
 
 ### The chart migrates the database itself
 
-An init container runs Alembic before the app starts. To prove it, I dropped the schema and
-redeployed:
+Two init containers, in order:
 
 ```console
-$ kubectl exec <postgres> -- psql -c 'DROP TABLE tasks; DROP TABLE alembic_version;'
-DROP TABLE
-DROP TABLE
-
-$ helm upgrade --install taskboard helm/taskboard ...
-REVISION: 3
-
-$ kubectl get pod <backend> -o jsonpath='{.spec.initContainers[*].name}'
+$ kubectl get pod ... -o jsonpath='{.spec.initContainers[*].name}'
 wait-for-postgres run-migrations
 
-$ kubectl exec <postgres> -- psql -c '\dt'
- public | alembic_version | table | taskboard
- public | tasks           | table | taskboard
+$ kubectl logs ... -c wait-for-postgres
+waiting for postgres...
+stacks-postgres:5432 - accepting connections
+postgres is ready
+
+$ kubectl logs ... -c run-migrations
+INFO  [alembic.runtime.migration] Running upgrade  -> 0001, create books table
 ```
+
+A fresh database is migrated with no manual step. The `pg_isready` wait matters: without it
+Alembic races the database and the pod crash-loops on first install.
 
 ### Ingress splits `/` and `/api`
 
 ```console
---- GET /  -> the React SPA ---
-<!doctype html><html lang="en">...<title>TaskBoard</title>
+$ kubectl describe ingress stacks
+  Host          Path        Backends
+  stacks.local  /(api/.*)   stacks-backend:8000  (10.244.0.43:8000, 10.244.0.44:8000)
+                /(.*)       stacks-frontend:3000 (10.244.0.41:3000, 10.244.0.45:3000)
 
---- GET /api/tasks -> the FastAPI backend ---
-[]
-
---- POST through the ingress ---
-{"id":1,"title":"Migrated by the chart","description":"alembic ran in an init container",...}
+$ curl -H 'Host: stacks.local' http://192.168.49.2/          → HTTP 200
+$ curl -H 'Host: stacks.local' http://192.168.49.2/ | grep title
+<title>Stacks — library lending</title>
+$ curl -H 'Host: stacks.local' http://192.168.49.2/api/books/stats
+{"total":2,"available":1,"borrowed":1,"overdue":0}
 ```
 
-One host, one port, two applications — routed by path.
+One host and one port serving both. The curls run **inside the node** (`minikube ssh`) because on
+Docker Desktop for macOS the node IP `192.168.49.2` is not routable from the host.
 
-> **A bug worth recording:** the backend pods first hung in `Init:0/1`. `pg_isready` was
-> returning *"no attempt"* — exit code 3, meaning invalid connection parameters, because I had
-> omitted `-U`. Without a username it could not even try. Adding `-U` fixed it. "no attempt" is
-> not "no response", and the distinction is the whole diagnosis.
+### The PVC survives its pod
 
-![helm deploy](screenshots/helm-deploy.png)
+```console
+$ kubectl delete pod -l app.kubernetes.io/component=postgres
+$ curl .../api/books/stats
+{"total":2,"available":1,"borrowed":1,"overdue":0}    ← same counts
+```
+
+The database pod was destroyed and rebuilt; the data came back, because it lives in the PVC, not
+the pod.
+
+### HPA
+
+```console
+$ kubectl get hpa -n stacks
+NAME             REFERENCE                   TARGETS       MINPODS   MAXPODS   REPLICAS
+stacks-backend   Deployment/stacks-backend   cpu: 6%/60%   2         8         2
+```
+
+A real utilisation figure, not `<unknown>` — which is what you get until metrics-server is
+actually serving.
+
+![helm install and what it built](screenshots/helm-deploy.png)
+
+![ingress, persistence and HPA](screenshots/k8s-ingress-hpa.png)
 
 ---
 
 ## M9 — Observability
 
 ```console
-$ curl -s <backend>/metrics
-# HELP taskboard_http_requests_total Total HTTP requests served.
-# TYPE taskboard_http_requests_total counter
-taskboard_http_requests_total{version="1.0.0"} 7
-# TYPE taskboard_http_errors_total counter
-taskboard_http_errors_total{version="1.0.0"} 0
-# TYPE taskboard_request_latency_seconds gauge
-taskboard_request_latency_seconds 0.001966
-# TYPE taskboard_tasks_total gauge
-taskboard_tasks_total 2
+$ curl http://stacks-backend:8000/metrics
+# TYPE stacks_http_requests_total counter
+stacks_http_requests_total{version="1.0.0"} 63
+# HELP stacks_http_errors_total Total 5xx responses, excluding probes.
+stacks_http_errors_total{version="1.0.0"} 0
+# HELP stacks_not_ready_total Times the readiness probe answered 503.
+stacks_not_ready_total{version="1.0.0"} 1
+# TYPE stacks_books_total gauge
+stacks_books_total{state="available"} 1
+stacks_books_total{state="borrowed"} 1
+# TYPE stacks_books_overdue gauge
+stacks_books_overdue 0
 ```
 
-### Prometheus is scraping the application
+> **`stacks_not_ready_total` exists because of a bug I shipped and then found.** `/ready` answers
+> 503 on purpose while Postgres is still starting, and I was counting that in
+> `stacks_http_errors_total` — so the Grafana error panel read **2** after a perfectly healthy
+> rollout, and anyone alerting on errors would have been paged for a normal start. Probe 5xx now
+> increments its own counter, and a test pins the separation.
 
-Backend pods carry `prometheus.io/scrape`, `port` and `path` annotations; Prometheus discovers
-them with `kubernetes_sd_configs`.
-
-![prometheus targets](screenshots/prometheus-targets.png)
+### Prometheus discovers the pods
 
 ```console
-$ query: taskboard_http_requests_total
-    taskboard-taskboard-backend-6f797db57d-h94mr   = 244
-    taskboard-taskboard-backend-6f797db57d-vnr27   = 243
-
-$ query: up{job="taskboard-pods"}
-    ...-h94mr = 1
-    ...-vnr27 = 1
-
-$ query: sum(rate(taskboard_http_requests_total[5m]))
-    0.1264 requests/sec
+$ kubectl get pod -l ...component=backend -o jsonpath='...prometheus.io/scrape...'
+stacks-backend-7fd5ccdf97-dbh6k  true  port=8000
+stacks-backend-7fd5ccdf97-w85cn  true  port=8000
 ```
 
-### Grafana, with live panels
+```text
+prometheus    http://localhost:9090/metrics      UP
+stacks-pods   http://10.244.0.61:8000/metrics    UP
+stacks-pods   http://10.244.0.59:8000/metrics    UP
+```
+
+![Prometheus targets](screenshots/prometheus-targets-ui.png)
+
+Nothing lists those pods by hand — `kubernetes_sd_configs` finds them from the annotations, so a
+scaled-up pod is scraped the moment it exists.
+
+### PromQL against live data
 
 ```console
-$ curl -s <grafana>/api/health
-{ "database": "ok", "version": "11.2.0" }
+$ sum(up{job="stacks-pods"})                     2
+$ stacks_books_total                             state=available 1 · state=borrowed 1
+$ sum(rate(stacks_http_requests_total[5m]))      0.021
 
-$ curl -s '<grafana>/api/search?query=TaskBoard'
-    TaskBoard  (uid=taskboard, folder=TaskBoard)
+--- 200 requests through the Service, then ---
+$ sum(rate(stacks_http_requests_total[2m]))      2.360
+$ sum by (pod) (rate(...))                       dbh6k 1.250 · w85cn 1.113
 ```
 
-![grafana dashboard](screenshots/grafana-dashboard.png)
+The load split across **both** pods, which is the Service load-balancing visible in the metrics.
 
-Six populated panels: **0.320 requests/sec**, **2 tasks stored**, **2 backend pods UP**,
-**0 errors**, plus request-rate and latency timeseries broken out per pod.
+![PromQL and the rate moving](screenshots/monitoring.png)
 
-Two deployment paths are provided: [`monitoring/prometheus-values.yaml`](taskboard/monitoring/)
-for `kube-prometheus-stack` in production, and
-[`monitoring/in-cluster-stack.yaml`](taskboard/monitoring/) — the lightweight equivalent actually
-used here, since the full stack is heavy for minikube.
+### Grafana
 
-![monitoring](screenshots/monitoring.png)
+![the Grafana dashboard](screenshots/grafana-dashboard.png)
+
+Provisioned from a ConfigMap — datasource, folder and dashboard all arrive with the manifest, so
+nothing is clicked together by hand. Requests/sec, copies on loan, pods up, errors (0) and
+readiness 503s (2) across the top; per-pod request rate and latency below; and the shelf over
+time at the bottom.
 
 ---
 
-## M10 — Documentation
-
-[`taskboard/README.md`](taskboard/README.md) explains what the application does, how to run it
-locally, how to test it, and how to deploy it.
-
-### Live demo
+## M10 — Documentation and the live demo
 
 ```bash
 # 1. change something
-vim "Final DevOps Project/taskboard/backend/app/main.py"
+vim stacks/backend/app/main.py
 
 # 2. commit and push
-git commit -am "feat: ..." && git push
+git commit -am "..." && git push
 
 # 3. watch the pipeline
 gh run watch
 
-# 4. the new image appears in GHCR tagged with this commit's SHA
-#    helm upgrade --install ... --set backend.image.tag=<sha>
+# 4. the new image is in GHCR, tagged with this commit
+docker pull ghcr.io/hemangtk/stacks-backend:$(git rev-parse --short=12 HEAD)
+
+# 5. roll it out
+helm upgrade --install stacks helm/stacks -n stacks --wait
+kubectl get pods -n stacks -w
 ```
+
+That loop is the whole project: a commit is the only input, and everything downstream — tests,
+scans, the registry, the cluster — follows from it.
 
 ---
 
-## Reproduce
+## Run it yourself
 
 ```bash
-cd taskboard
-docker compose up --build            # http://localhost:8080
+cd stacks
+docker compose up --build          # http://localhost:3000
+cd backend && pytest -v --cov=app  # 20 tests
 
-cd backend && pytest --cov=app       # 12 tests
-
-minikube start --cpus=4 --memory=4096
-minikube addons enable ingress metrics-server default-storageclass
 kubectl apply -f k8s/namespace.yaml
-helm upgrade --install taskboard helm/taskboard -n taskboard --wait
-
-kubectl apply -f monitoring/grafana-dashboard.yaml -n monitoring
+helm upgrade --install stacks helm/stacks -n stacks --wait
 kubectl apply -f monitoring/in-cluster-stack.yaml
-kubectl port-forward -n monitoring svc/grafana 3031:3000
+kubectl apply -f monitoring/grafana-dashboard.yaml -n monitoring
 
 cd terraform && terraform init && terraform plan
 ```
 
 ---
 
-## Lessons learned
+## What I took away
 
-1. **Read the rubric before building.** My first capstone followed the homework doc's generic
-   brief and scored roughly half of this one, because the rubric names specific technologies the
-   doc never mentions. The lesson is cheap to state and was expensive to learn.
-2. **A failing security gate is a prompt to fix, not to weaken.** Both scans failed on first run;
-   both were fixable in minutes with a dependency bump and an `apk upgrade`.
-3. **Run every CI step locally first.** The one time I skipped it — pytest after an edit but not
-   flake8 — cost a red pipeline over a 101-character line.
-4. **Non-root containers are mostly a filesystem-ownership problem**, not a user-creation one.
-5. **Error text rewards close reading.** `pg_isready` "no attempt" vs "no response" was the
-   entire diagnosis of a stalled rollout.
-6. **Separate liveness from readiness at the application layer.** No amount of YAML fixes an app
-   that cannot say whether it is ready.
+1. **Derive what time decides.** Storing an `OVERDUE` status would be wrong every midnight until
+   a job fixed it. Computing it from `due_date` means the data cannot drift out of date.
+2. **Put the constraint in the database too.** The duplicate-ISBN check in the handler is a nice
+   error message; the `UNIQUE` index is what actually prevents the duplicate.
+3. **Route order is behaviour.** `/api/books/stats` declared after `/api/books/{id}` is parsed as
+   an id and 422s. It needs a test, because it is invisible until someone reorders the file.
+4. **A readiness 503 is not an error**, and conflating them turns every healthy rollout into an
+   alert. I only caught this because a dashboard panel read 2 when it should have read 0.
+5. **`runAsNonRoot` does not make a container non-root** — it refuses to start one that isn't.
+   The Dockerfile has to agree with the pod spec.
+6. **Say what did not work.** EKS does not exist in this project's infrastructure because
+   LocalStack returns 501, and the plan output plus `terraform state list` show exactly that.
+   A green "Apply complete!" filtered out of the capture would have been a lie.
