@@ -116,7 +116,7 @@ jobs:
         run: docker build -t ${{ env.IMAGE_NAME }}:scan .
 
       - name: Trivy - full report (informational)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: ${{ env.IMAGE_NAME }}:scan
           format: table
@@ -128,7 +128,7 @@ jobs:
         run: cat trivy-report.txt
 
       - name: Trivy - THE GATE (fail on CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: ${{ env.IMAGE_NAME }}:scan
           format: table
