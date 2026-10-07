@@ -1,0 +1,26 @@
+# Lives OUTSIDE app/ on purpose: ArgoCD renders every manifest under the watched
+# path, so an Application stored there would try to manage itself.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: session20-mini
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/hemangtk/DevOps.git
+    targetRevision: main
+    path: Monitoring Observability and GitOps/mini-project/app
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: session20
+
+  syncPolicy:
+    automated:
+      prune: true # delete what git no longer declares
+      selfHeal: true # revert manual cluster changes
+    syncOptions:
+      - CreateNamespace=true
