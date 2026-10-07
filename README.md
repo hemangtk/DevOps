@@ -20,6 +20,10 @@ alongside.
 | [`Kubernetes Pods ReplicaSets and Deployments/`](Kubernetes%20Pods%20ReplicaSets%20and%20Deployments/) | Self-healing, scaling, rolling update, recreate, blue-green, canary, pod lifecycle | Session 10 |
 | [`Kubernetes Networking and Services/`](Kubernetes%20Networking%20and%20Services/) | ClusterIP, NodePort, LoadBalancer, ExternalName, headless, DNS | Session 11 |
 | [`Kubernetes Ingress ConfigMaps and Secrets/`](Kubernetes%20Ingress%20ConfigMaps%20and%20Secrets/) | ConfigMaps, Secrets, path-based Ingress routing | Session 12 |
+| [`Kubernetes Storage HPA and Probes/`](Kubernetes%20Storage%20HPA%20and%20Probes/) | Volumes, PV/PVC, dynamic provisioning, autoscaling, probes | Session 13 |
+| [`Kubernetes Troubleshooting/`](Kubernetes%20Troubleshooting/) | Nine failures, each broken then diagnosed and fixed | Session 14 |
+| [`Helm/`](Helm/) | A chart from scratch, install/upgrade/rollback/uninstall | Session 15 |
+| [`CICD and GitHub Actions/`](CICD%20and%20GitHub%20Actions/) | A CI pipeline that really runs on every push | Session 16 |
 
 Each folder has its own README with the commands, the real output, an explanation of what the
 output means, and screenshots.
