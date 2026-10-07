@@ -17,17 +17,17 @@ alongside.
 | [`DockerFiles and Images/`](DockerFiles%20and%20Images/) | Multi-stage Go build — 467 MB toolchain down to a 6.98 MB image, on port 8080 | Tasks 1–3 |
 | [`Docker Networks/`](Docker%20Networks/) | Three-tier networks, host network, bind mounts, overlay networks | Tasks 1–4 |
 | [`Kubernetes Fundamentals/`](Kubernetes%20Fundamentals/) | Architecture, control plane, namespaces, the first Pod | Session 9 |
-| [`Kubernetes Pods ReplicaSets and Deployments/`](Kubernetes%20Pods%20ReplicaSets%20and%20Deployments/) | Self-healing, scaling, rolling update, recreate, blue-green, canary, pod lifecycle | Session 10 |
+| [`Kubernetes Pods ReplicaSets and Deployments/`](Kubernetes%20Pods%20ReplicaSets%20and%20Deployments/) | Self-healing, scaling, rolling update, recreate, blue-green, canary, pod lifecycle, DaemonSet, StatefulSet | Session 10 |
 | [`Kubernetes Networking and Services/`](Kubernetes%20Networking%20and%20Services/) | ClusterIP, NodePort, LoadBalancer, ExternalName, headless, DNS | Session 11 |
-| [`Kubernetes Ingress ConfigMaps and Secrets/`](Kubernetes%20Ingress%20ConfigMaps%20and%20Secrets/) | ConfigMaps, Secrets, path-based Ingress routing | Session 12 |
+| [`Kubernetes Ingress ConfigMaps and Secrets/`](Kubernetes%20Ingress%20ConfigMaps%20and%20Secrets/) | ConfigMaps, Secrets, path-based Ingress routing, two failure drills | Session 12 |
 | [`Kubernetes Storage HPA and Probes/`](Kubernetes%20Storage%20HPA%20and%20Probes/) | Volumes, PV/PVC, dynamic provisioning, autoscaling, probes | Session 13 |
-| [`Kubernetes Troubleshooting/`](Kubernetes%20Troubleshooting/) | Nine failures, each broken then diagnosed and fixed | Session 14 |
-| [`Helm/`](Helm/) | A chart from scratch, install/upgrade/rollback/uninstall | Session 15 |
+| [`Kubernetes Troubleshooting/`](Kubernetes%20Troubleshooting/) | Nine failures, each broken then diagnosed and fixed, + mini project | Session 14 |
+| [`Helm/`](Helm/) | A chart from scratch, install/upgrade/rollback/uninstall, + mini project | Session 15 |
 | [`CICD and GitHub Actions/`](CICD%20and%20GitHub%20Actions/) | A CI pipeline that really runs on every push | Session 16 |
-| [`DevSecOps/`](DevSecOps/) | SAST, SCA, secret and image scanning behind a real security gate | Session 17 |
+| [`DevSecOps/`](DevSecOps/) | SAST, SCA, secret and image scanning behind a real security gate, then a gated push to GHCR | Session 17 |
 | [`Terraform and IaC/`](Terraform%20and%20IaC/) | Full Terraform lifecycle + AWS service notes | Session 18 |
-| [`Cloud and Terraform in Action/`](Cloud%20and%20Terraform%20in%20Action/) | VPC, subnets, IGW, security groups, EC2, S3 — 13 resources | Session 19 |
-| [`Monitoring Observability and GitOps/`](Monitoring%20Observability%20and%20GitOps/) | Prometheus with a firing alert, and ArgoCD self-healing | Session 20 |
+| [`Cloud and Terraform in Action/`](Cloud%20and%20Terraform%20in%20Action/) | VPC, subnets, IGW, security groups, EC2, S3 — 13 resources, + mini project | Session 19 |
+| [`Monitoring Observability and GitOps/`](Monitoring%20Observability%20and%20GitOps/) | Prometheus with a firing alert, and ArgoCD self-healing, + mini project | Session 20 |
 | [`Final DevOps Project/`](Final%20DevOps%20Project/) | TaskBoard capstone — everything, end to end | Session 21 |
 
 Each folder has its own README with the commands, the real output, an explanation of what the
@@ -54,9 +54,20 @@ output means, and screenshots.
 - **All five Service types**, including a headless Service resolving to every pod IP and a
   deliberate one-character selector typo producing the classic empty-endpoints bug —
   [`Kubernetes Networking and Services/`](Kubernetes%20Networking%20and%20Services/)
-- **Path-based Ingress routing** — one IP and port 80 serving two apps, plus a demonstration
-  that a Secret is base64-*encoded*, not encrypted —
+- **Path-based Ingress routing** — one IP and port 80 serving two apps, plus two failure drills:
+  a Secret encoded with plain `echo` really failing Postgres authentication over one invisible
+  newline, and a live ConfigMap change reaching the mounted file at t+71s while the environment
+  variable stayed stale —
   [`Kubernetes Ingress ConfigMaps and Secrets/`](Kubernetes%20Ingress%20ConfigMaps%20and%20Secrets/)
+- **A DaemonSet on a genuinely two-node cluster**, where `DESIRED` moved 2 → 1 → 2 from node
+  labels alone and `kubectl scale` failed because a DaemonSet has no `replicas` field at all —
+  [`Kubernetes Pods ReplicaSets and Deployments/`](Kubernetes%20Pods%20ReplicaSets%20and%20Deployments/#9-daemonset--one-pod-per-node)
+- **An image built, scanned, gated, pushed to GHCR and pulled back by digest** from a different
+  machine — `sha256:9695bfc9f272`, running as uid 10001 —
+  [`DevSecOps/`](DevSecOps/#6-push-to-the-registry--after-the-gate-never-before)
+- **ArgoCD reverting a manual `kubectl scale` in under a second**, with the cluster's own
+  `ScalingReplicaSet` events recording both halves —
+  [`Monitoring Observability and GitOps/`](Monitoring%20Observability%20and%20GitOps/mini-project/)
 
 ---
 
