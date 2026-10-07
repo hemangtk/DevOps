@@ -379,6 +379,34 @@ containers:
 `readOnlyRootFilesystem: true` needs a writable `emptyDir` at `/tmp`, which the manifest mounts —
 that is the usual catch when enabling it.
 
+### `runAsNonRoot` is not enough on its own
+
+Writing those settings is the easy half. I had them in the manifest while the **image** still
+had no `USER` at all — and only noticed when I pulled the pushed image back and ran `id`:
+
+```console
+$ docker run --rm --entrypoint sh ghcr.io/hemangtk/devops-cicd-demo:<sha> -c 'id'
+uid=0(root) gid=0(root) groups=0(root)
+```
+
+`runAsNonRoot: true` does not *make* a container non-root; it **refuses to start** one whose
+user resolves to uid 0, with `CreateContainerConfigError`. So the pod spec and the Dockerfile
+have to agree:
+
+```dockerfile
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin appuser \
+ && chown -R appuser:appuser /srv
+USER 10001
+```
+
+```console
+$ docker run --rm --entrypoint sh <image> -c 'id'
+uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
+```
+
+The uid matches `runAsUser: 10001` in the manifest deliberately — if they disagree, the files
+`chown`ed at build time are owned by a user the container is not running as.
+
 ![local security scans](screenshots/security-scans-local.png)
 
 ---
