@@ -76,7 +76,8 @@ def ready(response: Response):
 @app.get("/metrics", tags=["ops"])
 def metrics(db: Session = Depends(database.get_db)) -> Response:
     task_count = db.scalar(select(func.count()).select_from(Task)) or 0
-    avg = _metrics["latency_sum"] / _metrics["requests_total"] if _metrics["requests_total"] else 0.0
+    reqs = _metrics["requests_total"]
+    avg = _metrics["latency_sum"] / reqs if reqs else 0.0
     body = "\n".join(
         [
             "# HELP taskboard_http_requests_total Total HTTP requests served.",
