@@ -45,4 +45,11 @@ def calc(op, a, b):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    # bandit B104: binding to 0.0.0.0 is flagged as "all interfaces".
+    # ACCEPTED, with justification: this process runs inside a container whose
+    # only network namespace is its own. Binding 127.0.0.1 would make it
+    # unreachable through the published port - see the Docker Fundamentals
+    # topic, where exactly that mistake is demonstrated. Exposure is controlled
+    # by the container's port publishing and by Kubernetes NetworkPolicy, not
+    # by the bind address.
+    app.run(host="0.0.0.0", port=5000)  # nosec B104

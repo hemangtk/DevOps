@@ -1,0 +1,16 @@
+# gitleaks configuration
+# Name: Hemang | Enrollment number: 24bcs10209
+title = "DevOps coursework gitleaks config"
+
+[extend]
+useDefault = true          # start from gitleaks' built-in rule set
+
+# The coursework deliberately contains FAKE credentials used to teach what a
+# Secret is and why base64 is not encryption. They are allowlisted by path so
+# the scanner still protects the real source tree.
+[allowlist]
+description = "Teaching material with deliberately fake credentials"
+paths = [
+  '''Kubernetes Ingress ConfigMaps and Secrets/.*''',
+  '''DevSecOps/security/example-vulnerable\.py''',
+]
