@@ -1,0 +1,17 @@
+{{- /* A page whose content comes from values.yaml, so `helm upgrade --set` is visible. */ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "devops-app.fullname" . }}-page
+  labels:
+    {{- include "devops-app.labels" . | nindent 4 }}
+data:
+  index.html: |
+    <!doctype html>
+    <html><head><title>{{ .Chart.Name }}</title></head>
+    <body>
+      <h1>{{ .Values.message }}</h1>
+      <p>chart version {{ .Chart.Version }} &middot; app version {{ .Chart.AppVersion }}</p>
+      <p>replicas requested: {{ .Values.replicaCount }}</p>
+      <p>Hemang &middot; 24bcs10209</p>
+    </body></html>
