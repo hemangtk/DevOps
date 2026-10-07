@@ -27,7 +27,7 @@ Source: [`stacks/`](stacks/) · Pipeline:
 |---|---|---|
 | **M1** | Application | [below](#m1--application) · 6 endpoints, Alembic migration, React UI |
 | **M2** | Testing | [below](#m2--testing) · 20 tests, 95% coverage, SQLite not Postgres |
-| **M3** | Git and GitHub | [below](#m3--git-and-github) · public repo, 36 commits, `.gitignore` |
+| **M3** | Git and GitHub | [below](#m3--git-and-github) · public repo, 34 commits, `.gitignore` |
 | **M4** | Docker | [below](#m4--docker) · multi-stage, **both images non-root** |
 | **M5** | CI/CD | [below](#m5--cicd) · 6 gated jobs, GHCR, SHA tags |
 | **M6** | DevSecOps | [below](#m6--devsecops) · Trivy on both images, fixable-only gate |
@@ -225,7 +225,8 @@ needs no running services.
 
 ## M3 — Git and GitHub
 
-Public at **<https://github.com/hemangtk/DevOps>**, 36 commits, each describing what changed and
+Public at **<https://github.com/hemangtk/DevOps>**, 34 commits (the rubric asks for 10), each
+describing what changed and
 why. `.gitignore` excludes `.env`, `__pycache__`, `node_modules`, `.venv`, `.terraform/`,
 `*.tfstate` and `terraform.tfvars`; only `.env.example` and `terraform.tfvars.example` are
 committed. gitleaks scans the full history on every push and is one of the gate's inputs.
