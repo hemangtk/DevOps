@@ -11,8 +11,9 @@ reconciling a live cluster against this very repository**.
 | [Task 1](#task-1--monitoring) | Metrics, logs, alerts, CPU/memory, app health |
 | [Task 2](#task-2--observability) | The three pillars and why they differ |
 | [Task 3](#task-3--gitops) | ArgoCD: sync from git, self-heal, git-driven change |
+| [Mini project](mini-project/) | Namespace + Deployment + Service managed end-to-end by ArgoCD, plus the viva answers |
 
-Config: [`monitoring/`](monitoring/) · [`gitops/`](gitops/)
+Config: [`monitoring/`](monitoring/) · [`gitops/`](gitops/) · [`mini-project/`](mini-project/)
 
 ---
 

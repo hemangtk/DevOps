@@ -1,4 +1,6 @@
 # The ArgoCD Application: "keep namespace gitops-demo matching this git path".
+# It lives OUTSIDE gitops/ on purpose: ArgoCD renders every manifest under the
+# path it watches, so an Application stored there would try to manage itself.
 # Name: Hemang | Enrollment number: 24bcs10209
 apiVersion: argoproj.io/v1alpha1
 kind: Application
