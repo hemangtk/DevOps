@@ -301,7 +301,7 @@ argocd-repo-server-d89c7967d-v2c5m     1/1   Running
 argocd-server-776b7cdd4d-fb7bb         1/1   Running
 ...
 
-$ kubectl apply -f gitops/argocd-application.yaml
+$ kubectl apply -f 'Monitoring Observability and GitOps/argocd-application.yaml'
 application.argoproj.io/gitops-demo created
 
   t+10s  sync/health = /
@@ -320,6 +320,22 @@ deployment.apps/gitops-demo        2/2
 ```
 
 **I never ran `kubectl apply` for that deployment.** ArgoCD read it from GitHub and created it.
+
+### One layout rule that is easy to get wrong
+
+[`argocd-application.yaml`](argocd-application.yaml) sits **beside** `gitops/`, not inside it.
+ArgoCD renders *every* manifest under the path it watches, so an Application stored there is
+rendered as one of its own workloads and ends up managing itself. I had it inside at first; one
+directory level up is the whole fix, and afterwards the Application manages only what it should:
+
+```console
+$ kubectl get application gitops-demo -n argocd \
+    -o jsonpath='{range .status.resources[*]}{.kind}/{.name}{"\n"}{end}'
+Service/gitops-demo
+Deployment/gitops-demo
+```
+
+Two managed resources, and **no Application among them**.
 
 ### Demo 1 — self-heal
 
@@ -415,10 +431,14 @@ docker start node-exporter
 kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 kubectl wait --for=condition=available --timeout=420s deployment/argocd-server -n argocd
-kubectl apply -f gitops/argocd-application.yaml
+kubectl apply -f argocd-application.yaml          # NOT inside gitops/
 kubectl get application gitops-demo -n argocd
 
 kubectl scale deployment/gitops-demo -n gitops-demo --replicas=5   # watch it revert
+
+# the full mini project
+kubectl apply -f mini-project/argocd-application.yaml
+kubectl get application session20-mini -n argocd
 ```
 
 ---
