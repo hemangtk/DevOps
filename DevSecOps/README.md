@@ -32,8 +32,10 @@ Image Scan ───┤          │              │
                    ▼
             SECURITY GATE          ← every stage must be green
                    │
-                   ▼
-           Deploy to Kubernetes    ← skipped entirely if the gate fails
+          ┌────────┴────────┐
+          ▼                 ▼
+   Push to GHCR      Deploy to Kubernetes   ← both skipped if the gate fails
+  (SHA + latest)
 ```
 
 | Stage | Tool | Looks for |
@@ -297,7 +299,48 @@ image-scan-report    8943 bytes
 
 ---
 
-## 6. Deploy stage
+## 6. Push to the registry — after the gate, never before
+
+```yaml
+push-image:
+  name: Push to the container registry
+  needs: [security-gate]        # the image cannot leave CI unless the gate passed
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+```
+
+**`needs: [security-gate]` is the entire security control.** A scanned-but-unpushed image is
+harmless; the moment it reaches a registry, anything with pull access can run it. So the push is
+downstream of the gate, and the `if:` keeps pull-request builds — which are untrusted code —
+from publishing anything at all.
+
+Authentication uses no stored password:
+
+```yaml
+permissions:
+  packages: write               # scopes the per-run GITHUB_TOKEN
+
+- run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+```
+
+`GITHUB_TOKEN` is minted for the run and expires with it. Compare that with a long-lived
+`REGISTRY_PASSWORD` in repository secrets, which is valid until somebody remembers to rotate it.
+
+### Tagging
+
+```bash
+REPO=ghcr.io/hemangtk/devops-cicd-demo
+SHA=${GITHUB_SHA::12}
+docker build -t "$REPO:$SHA" -t "$REPO:latest" .
+```
+
+Two tags, and the `:$SHA` one is the one that matters. **`latest` is a moving pointer** — it says
+nothing about what is actually running, so "we deployed latest" is unanswerable at 3am. The
+commit SHA tag makes a running container traceable to the exact source that built it, which is
+also what makes a rollback a specific tag rather than a guess.
+
+---
+
+## 7. Deploy stage
 
 ```console
 $ kubeconform -strict -summary DevSecOps/k8s/
@@ -340,7 +383,7 @@ that is the usual catch when enabling it.
 
 ---
 
-## 7. Reproduce
+## 8. Reproduce
 
 ```bash
 cd "CICD and GitHub Actions"
@@ -361,7 +404,7 @@ kubeconform -strict -summary DevSecOps/k8s/
 
 ---
 
-## 8. What I took away
+## 9. What I took away
 
 1. **Four scanners, four blind spots.** SAST reads your code, SCA reads your dependencies,
    gitleaks reads your history, Trivy reads your image. Only SCA would have found the Flask CVE.
