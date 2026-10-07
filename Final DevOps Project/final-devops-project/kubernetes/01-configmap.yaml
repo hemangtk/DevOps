@@ -1,0 +1,11 @@
+# Non-sensitive configuration.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taskboard-config
+  namespace: taskboard
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  POSTGRES_DB: "taskboard"

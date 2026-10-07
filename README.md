@@ -25,6 +25,10 @@ alongside.
 | [`Helm/`](Helm/) | A chart from scratch, install/upgrade/rollback/uninstall | Session 15 |
 | [`CICD and GitHub Actions/`](CICD%20and%20GitHub%20Actions/) | A CI pipeline that really runs on every push | Session 16 |
 | [`DevSecOps/`](DevSecOps/) | SAST, SCA, secret and image scanning behind a real security gate | Session 17 |
+| [`Terraform and IaC/`](Terraform%20and%20IaC/) | Full Terraform lifecycle + AWS service notes | Session 18 |
+| [`Cloud and Terraform in Action/`](Cloud%20and%20Terraform%20in%20Action/) | VPC, subnets, IGW, security groups, EC2, S3 — 13 resources | Session 19 |
+| [`Monitoring Observability and GitOps/`](Monitoring%20Observability%20and%20GitOps/) | Prometheus with a firing alert, and ArgoCD self-healing | Session 20 |
+| [`Final DevOps Project/`](Final%20DevOps%20Project/) | TaskBoard capstone — everything, end to end | Session 21 |
 
 Each folder has its own README with the commands, the real output, an explanation of what the
 output means, and screenshots.
