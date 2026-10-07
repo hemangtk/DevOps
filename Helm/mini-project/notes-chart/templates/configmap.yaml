@@ -1,0 +1,17 @@
+{{/* The page content comes from values, so an upgrade is VISIBLE.
+     Name: Hemang | 24bcs10209 */}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "notes-chart.fullname" . }}
+  labels: {{- include "notes-chart.labels" . | nindent 4 }}
+data:
+  index.html: |
+    <!doctype html>
+    <html><head><meta charset="utf-8"><title>{{ .Values.notes.title }}</title></head>
+    <body>
+      <h1>{{ .Values.notes.title }}</h1>
+      <p>{{ .Values.notes.message }}</p>
+      <p>chart {{ .Chart.Name }}-{{ .Chart.Version }} &middot; replicas {{ .Values.replicaCount }}</p>
+      <p>Hemang &middot; 24bcs10209</p>
+    </body></html>

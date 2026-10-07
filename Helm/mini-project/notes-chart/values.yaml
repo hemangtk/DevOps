@@ -1,0 +1,21 @@
+# Default (dev) values.
+# Name: Hemang | Enrollment number: 24bcs10209
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "1.27-alpine"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+# rendered into the ConfigMap that becomes the page
+notes:
+  title: "Notes (dev)"
+  message: "Running from the default values.yaml"
+
+resources:
+  requests: { cpu: 25m, memory: 32Mi }
+  limits:   { cpu: 200m, memory: 128Mi }

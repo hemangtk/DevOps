@@ -11,7 +11,8 @@ from one `terraform apply`.
 > and their responses are genuine; nothing is billable. Pointing at real AWS means deleting the
 > `endpoints` block and fake credentials from `provider.tf`.
 
-Config: [`infra/`](infra/)
+Config: [`infra/`](infra/) · Mini project: [`mini-project/`](mini-project/) — the course's exact
+six-resource brief (VPC `10.20.0.0/16`), built and verified separately.
 
 ---
 

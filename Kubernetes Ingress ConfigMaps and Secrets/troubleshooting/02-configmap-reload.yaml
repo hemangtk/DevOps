@@ -1,0 +1,40 @@
+# The same ConfigMap consumed twice - as env vars AND as a mounted volume -
+# so you can watch only one of them pick up a live change.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 5; done"]
+
+          # path 1: environment variables - fixed at container start
+          envFrom:
+            - configMapRef: { name: app-config }
+
+          # path 2: a mounted volume - re-synced by the kubelet
+          volumeMounts:
+            - name: cfg
+              mountPath: /etc/cfg
+              readOnly: true
+      volumes:
+        - name: cfg
+          configMap: { name: app-config }

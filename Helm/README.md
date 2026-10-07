@@ -12,6 +12,7 @@ Chart: [`devops-app/`](devops-app/)
 |---|---|
 | [Task 1](#task-1--the-commands) | `create`, `lint`, `template`, `install`, `list`, `status`, `get`, `upgrade`, `history`, `rollback`, `uninstall`, `repo`, `search` |
 | [Task 2](#task-2--the-rollback-workflow) | install → upgrade → verify → upgrade → verify → rollback → verify |
+| [Mini project](mini-project/) | A second chart built from scratch — install → upgrade with an overlay → rollback |
 
 ---
 

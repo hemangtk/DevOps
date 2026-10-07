@@ -6,7 +6,7 @@
 Configuration separated from images, and one entry point routing to many services — run on a
 real minikube cluster (Kubernetes v1.37.0) with the `ingress-nginx` controller.
 
-Manifests: [`manifests/`](manifests/)
+Manifests: [`manifests/`](manifests/) · [`troubleshooting/`](troubleshooting/)
 
 | Section | Covers |
 |---|---|
@@ -14,7 +14,8 @@ Manifests: [`manifests/`](manifests/)
 | [2](#2-secret) | Secret, and why base64 is not security |
 | [3](#3-consuming-both) | Both injected into a running pod |
 | [4](#4-ingress) | Ingress: path routing, one entry point |
-| [5](#5-troubleshooting) | The common failures |
+| [5](#5-two-drills-run-to-the-point-of-failure) | The newline bug and the live ConfigMap change, both reproduced |
+| [6](#6-troubleshooting) | The common failures |
 
 ---
 
@@ -386,7 +387,149 @@ doesn't have.
 
 ---
 
-## 5. Troubleshooting
+## 5. Two drills, run to the point of failure
+
+The two bugs in the troubleshooting table below are the ones that cost real time, because neither
+produces an error message that points at the cause. Both are worth reproducing deliberately.
+
+Manifests: [`troubleshooting/`](troubleshooting/)
+
+### Drill 1 — the trailing newline in a Secret
+
+```console
+$ echo    'secretpassword' | base64
+c2VjcmV0cGFzc3dvcmQK
+$ echo -n 'secretpassword' | base64
+c2VjcmV0cGFzc3dvcmQ=
+```
+
+Three characters apart. Decode them and count:
+
+```console
+$ echo -n 'c2VjcmV0cGFzc3dvcmQK' | base64 -d | wc -c
+15
+$ echo -n 'c2VjcmV0cGFzc3dvcmQ=' | base64 -d | wc -c
+14
+
+$ echo -n 'c2VjcmV0cGFzc3dvcmQK' | base64 -d | od -An -c
+   s   e   c   r   e   t   p   a   s   s   w   o   r   d  \n
+$ echo -n 'c2VjcmV0cGFzc3dvcmQ=' | base64 -d | od -An -c
+   s   e   c   r   e   t   p   a   s   s   w   o   r   d
+```
+
+Now the part that matters: two Secrets holding those two values, a Postgres whose own password
+came from the good one, and two **otherwise identical** client pods.
+
+```console
+$ kubectl logs client-good        # exit phase: Succeeded
+ ok
+----
+  1
+(1 row)
+
+$ kubectl logs client-bad         # exit phase: Failed
+psql: error: connection to server at "postgres" (10.97.84.89), port 5432 failed:
+FATAL:  password authentication failed for user "postgres"
+```
+
+**This had to be run in Kubernetes to be honest.** My first attempt did it in a shell with
+`PGPASSWORD=$(... | base64 -d)` — and *both* passwords worked, because command substitution
+strips trailing newlines. The shell silently repaired the bug I was trying to demonstrate. The
+kubelet does not: it writes the decoded bytes straight into the process environment, newline
+included.
+
+And `kubectl` gives you almost nothing to go on:
+
+```console
+$ kubectl get secret db-good db-bad
+NAME      TYPE     DATA   AGE
+db-good   Opaque   1      16s
+db-bad    Opaque   1      16s          ← indistinguishable
+
+$ kubectl describe secret db-good | grep PASSWORD
+PASSWORD:  14 bytes
+$ kubectl describe secret db-bad | grep PASSWORD
+PASSWORD:  15 bytes                    ← the only hint there is
+```
+
+**`describe` prints byte counts, not values — so the byte count is your whole diagnostic.** If a
+password should be 14 characters and the Secret says 15, you have found it.
+
+The fix is to never type base64 by hand:
+
+```console
+$ kubectl get secret db-stringdata -o jsonpath='{.data.PASSWORD}'
+c2VjcmV0cGFzc3dvcmQ=
+```
+
+That Secret was written with `stringData: {PASSWORD: secretpassword}` and Kubernetes encoded it —
+byte-identical to the `echo -n` version.
+
+![the base64 newline bug](screenshots/secret-newline-bug.png)
+
+### Drill 2 — a live ConfigMap change
+
+One ConfigMap, consumed **both ways at once** by the same container, so the two behaviours can be
+compared side by side:
+
+```yaml
+envFrom:
+  - configMapRef: { name: app-config }     # as env vars
+volumeMounts:
+  - { name: cfg, mountPath: /etc/cfg }     # and as files
+```
+
+```console
+$ kubectl patch configmap app-config --type merge -p '{"data":{"ENVIRONMENT":"staging"}}'
+configmap/app-config patched
+
+$ kubectl get configmap app-config -o jsonpath='{.data.ENVIRONMENT}'
+staging
+
+$ kubectl exec deploy/backend -- env | grep ENVIRONMENT
+ENVIRONMENT=production        ← the object changed; the process did not
+```
+
+Polling the mounted file instead:
+
+```console
+  t+20s   production
+  t+51s   production
+  t+71s   staging   ← the FILE changed, with no restart
+
+$ kubectl get pods -l app=backend
+NAME                       READY   STATUS    RESTARTS   AGE
+backend-5645ff7bff-5jv6q   1/1     Running   0          72s
+```
+
+**`RESTARTS 0`, same pod, same age** — the kubelet swapped the file underneath a running
+container. It took 71 seconds, not instantly: the kubelet re-syncs on its own schedule
+(`--sync-frequency`, one minute by default), so mounted config is *eventually* consistent, never
+immediately. Code that reads a mounted config file must re-read it, or watch it, to benefit.
+
+The env var is still stale at this point, and only one thing fixes that:
+
+```console
+$ kubectl rollout restart deployment/backend
+deployment.apps/backend restarted
+
+$ kubectl exec deploy/backend -- env | grep ENVIRONMENT
+ENVIRONMENT=staging
+
+$ kubectl get pods -l app=backend
+backend-55cd9f77db-qzp6x   1/1   Running       0   0s      ← new pod
+backend-5645ff7bff-5jv6q   1/1   Terminating   0   72s
+```
+
+A **new container** read the new ConfigMap. The old one never could have — environment variables
+are copied into the process at `execve` time, and nothing, including the kubelet, can reach in
+and change them afterwards.
+
+![a live ConfigMap change](screenshots/configmap-reload.png)
+
+---
+
+## 6. Troubleshooting
 
 | Symptom | Likely cause | Check |
 |---|---|---|
@@ -426,6 +569,29 @@ minikube ssh -- "curl -s -H 'Host: devops.local' http://localhost/api"
 kubectl delete namespace k8s-lab
 ```
 
+The two drills:
+
+```bash
+kubectl create namespace drills
+
+# the newline bug
+kubectl apply -n drills -f troubleshooting/01-secret-newline.yaml
+kubectl logs -n drills client-good     # select 1 -> ok
+kubectl logs -n drills client-bad      # password authentication failed
+kubectl describe secret -n drills db-good db-bad | grep PASSWORD
+
+# the live ConfigMap change
+kubectl apply -n drills -f troubleshooting/02-configmap-reload.yaml
+kubectl patch configmap -n drills app-config --type merge \
+  -p '{"data":{"ENVIRONMENT":"staging"}}'
+kubectl exec -n drills deploy/backend -- env | grep ENVIRONMENT        # stale
+kubectl exec -n drills deploy/backend -- cat /etc/cfg/ENVIRONMENT      # updates in ~1 min
+kubectl rollout restart -n drills deployment/backend
+kubectl exec -n drills deploy/backend -- env | grep ENVIRONMENT        # fresh
+
+kubectl delete namespace drills
+```
+
 ---
 
 ## What I took away
@@ -433,13 +599,22 @@ kubectl delete namespace k8s-lab
 1. **ConfigMaps and Secrets are the same object with different handling.** Secrets are
    base64-encoded, hidden from `describe`, and mounted on tmpfs — but they are **not encrypted**,
    and `base64 -d` is one command away. RBAC and encryption-at-rest are the real protection.
-2. **Mounted volumes update live; env vars do not.** If config changes must apply without a
-   restart, mount them. Secrets should be mounted anyway, to keep them out of `describe pod` and
-   process listings.
-3. **The `..data/` symlink indirection** is how Kubernetes updates mounted config atomically.
-4. **An Ingress resource without a controller does nothing.** The resource is rules; the
+2. **Mounted volumes update live; env vars do not** — but "live" meant **71 seconds** when I
+   timed it, because the kubelet re-syncs on its own schedule. Mounted config is eventually
+   consistent, and the app still has to re-read the file. Secrets should be mounted anyway, to
+   keep them out of `describe pod` and process listings.
+3. **A Secret's byte count in `describe` is a real diagnostic.** A 14-character password showing
+   `15 bytes` is the newline bug, and it is the only thing `kubectl` will tell you — the two
+   Secrets are identical in `get`, and the only symptom is an authentication failure that blames
+   the password.
+4. **Be careful what your reproduction proves.** My first attempt at that drill ran the decode
+   through `$(...)`, which strips trailing newlines — so both passwords worked and the bug
+   vanished. Moving it into Kubernetes, where the kubelet sets the variable directly, was what
+   made the failure real.
+5. **The `..data/` symlink indirection** is how Kubernetes updates mounted config atomically.
+6. **An Ingress resource without a controller does nothing.** The resource is rules; the
    controller is the proxy.
-5. **Ingress is L7, Services are L4.** That is why one Ingress can host many apps on one IP and
+7. **Ingress is L7, Services are L4.** That is why one Ingress can host many apps on one IP and
    one certificate, while each LoadBalancer Service needs its own.
-6. **`rewrite-target` is not optional** when you route by path prefix — the backend receives the
+8. **`rewrite-target` is not optional** when you route by path prefix — the backend receives the
    full original path unless you strip it.

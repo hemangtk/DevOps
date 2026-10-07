@@ -13,6 +13,7 @@ Manifests: [`scenarios/`](scenarios/)
 | [Task 1](#task-1--the-commands) | `get`, `describe`, `logs`, `exec`, `events`, `explain`, `top` |
 | [Task 2](#task-2--nine-failures) | Nine issues, each broken → diagnosed → fixed → verified |
 | [Method](#the-method) | The order to check things in |
+| [Mini project](mini-project/) | One working app, two faults injected into it, each taken through the method |
 
 ---
 

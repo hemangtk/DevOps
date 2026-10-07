@@ -1,0 +1,15 @@
+# Production overrides - more replicas, more headroom, different copy.
+# Name: Hemang | Enrollment number: 24bcs10209
+replicaCount: 3
+
+service:
+  type: NodePort
+  port: 80
+
+notes:
+  title: "Notes (production)"
+  message: "Running from values-prod.yaml"
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
