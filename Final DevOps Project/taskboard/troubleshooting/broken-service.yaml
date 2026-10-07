@@ -1,0 +1,16 @@
+# BROKEN: the Service selector does not match the backend pod labels.
+# The Service gets a ClusterIP and resolves in DNS, but has ZERO endpoints.
+# Fix: app.kubernetes.io/component should be "backend", not "bakend".
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata:
+  name: broken-backend-svc
+  namespace: taskboard
+spec:
+  selector:
+    app.kubernetes.io/name: taskboard
+    app.kubernetes.io/component: bakend     # <-- typo
+  ports:
+    - port: 8000
+      targetPort: 8000

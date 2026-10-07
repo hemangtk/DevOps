@@ -1,0 +1,99 @@
+{{/* Name: Hemang | 24bcs10209 */}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taskboard.fullname" . }}-backend
+  labels: {{- include "taskboard.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.backend.autoscaling.enabled }}
+  replicas: {{ .Values.backend.replicaCount }}
+  {{- end }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  selector:
+    matchLabels: {{- include "taskboard.backend.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "taskboard.backend.selectorLabels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.backend.service.port | quote }}
+        prometheus.io/path: "/metrics"
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      {{- if .Values.postgres.enabled }}
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h {{ include "taskboard.fullname" . }}-postgres -p 5432 -U {{ .Values.secrets.postgresUser }}; do echo "waiting for postgres..."; sleep 2; done; echo "postgres is ready"
+        # Run Alembic BEFORE the app starts. Idempotent: `upgrade head` is a
+        # no-op when the schema is already current, so every pod can run it.
+        - name: run-migrations
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: { name: {{ include "taskboard.fullname" . }}-config }
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ include "taskboard.fullname" . }}-secret, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "taskboard.fullname" . }}-secret, key: POSTGRES_PASSWORD } }
+      {{- end }}
+      containers:
+        - name: backend
+          image: "{{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}"
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          ports: [{ containerPort: {{ .Values.backend.service.port }}, name: http }]
+          envFrom:
+            - configMapRef: { name: {{ include "taskboard.fullname" . }}-config }
+          env:
+            - name: APP_VERSION
+              value: {{ .Values.backend.image.tag | quote }}
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: {{ include "taskboard.fullname" . }}-secret, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ include "taskboard.fullname" . }}-secret, key: POSTGRES_PASSWORD } }
+          resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+          startupProbe:
+            httpGet: { path: /health, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "taskboard.fullname" . }}-backend
+  labels: {{- include "taskboard.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "taskboard.backend.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.backend.service.port }}
+      targetPort: http

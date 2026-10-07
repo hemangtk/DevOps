@@ -1,0 +1,74 @@
+# Helm values for kube-prometheus-stack.
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace -f monitoring/prometheus-values.yaml
+# Name: Hemang | Enrollment number: 24bcs10209
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    # pick up ServiceMonitors from every namespace, not just the release's
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits:   { cpu: "1",  memory: 2Gi }
+
+    # scrape any pod carrying prometheus.io/scrape=true - which the TaskBoard
+    # backend pods do, via their template annotations
+    additionalScrapeConfigs:
+      - job_name: taskboard-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces: { names: [taskboard] }
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+
+grafana:
+  enabled: true
+  adminPassword: admin          # demo only
+  service:
+    type: NodePort
+    nodePort: 30300
+  defaultDashboardsEnabled: true
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          url: http://monitoring-kube-prometheus-prometheus.monitoring:9090
+          access: proxy
+          isDefault: true
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: taskboard
+          folder: TaskBoard
+          type: file
+          options: { path: /var/lib/grafana/dashboards/taskboard }
+  dashboardsConfigMaps:
+    taskboard: taskboard-grafana-dashboard
+
+alertmanager:
+  enabled: true
+
+nodeExporter:
+  enabled: true
+kubeStateMetrics:
+  enabled: true

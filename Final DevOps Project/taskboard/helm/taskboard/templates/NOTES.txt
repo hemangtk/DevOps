@@ -1,0 +1,17 @@
+TaskBoard {{ .Chart.AppVersion }} deployed as release "{{ .Release.Name }}".
+Hemang - 24bcs10209
+
+Environment : {{ .Values.environment }}
+Backend     : {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }} ({{ if .Values.backend.autoscaling.enabled }}HPA {{ .Values.backend.autoscaling.minReplicas }}-{{ .Values.backend.autoscaling.maxReplicas }}{{ else }}{{ .Values.backend.replicaCount }} replicas{{ end }})
+Frontend    : {{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }} ({{ .Values.frontend.replicaCount }} replicas)
+Database    : {{ if .Values.postgres.enabled }}in-chart postgres, {{ .Values.postgres.persistence.size }} PVC{{ else }}external{{ end }}
+
+Check it:
+  kubectl get pods,svc,ingress -n {{ .Release.Namespace }}
+{{ if .Values.ingress.enabled }}
+Reach it (add {{ .Values.ingress.host }} to /etc/hosts first):
+  curl -H 'Host: {{ .Values.ingress.host }}' http://<ingress-ip>/
+  curl -H 'Host: {{ .Values.ingress.host }}' http://<ingress-ip>/api/tasks
+{{ else }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "taskboard.fullname" . }}-frontend 8080:{{ .Values.frontend.service.port }}
+{{ end }}

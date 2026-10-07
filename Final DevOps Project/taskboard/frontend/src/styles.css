@@ -1,0 +1,44 @@
+/* Name: Hemang | Enrollment number: 24bcs10209 */
+:root {
+  --bg: #0f1116;
+  --panel: #171a22;
+  --line: #262b36;
+  --text: #e6e9ef;
+  --muted: #9aa3b2;
+  --accent: #5aa9e6;
+  --ok: #4ec9a5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 2rem 1rem 4rem; }
+header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+h1 { margin: 0; font-size: 1.9rem; letter-spacing: -.02em; }
+.meta { color: var(--muted); font-size: .85rem; font-family: ui-monospace, monospace; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem; margin-top: 1.25rem; }
+form { display: flex; gap: .5rem; flex-wrap: wrap; }
+input[type=text] {
+  flex: 1 1 240px; min-width: 0; padding: .65rem .8rem; border-radius: 8px;
+  border: 1px solid var(--line); background: #0d0f14; color: var(--text); font-size: 1rem;
+}
+input[type=text]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+button {
+  padding: .65rem 1.1rem; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--accent); color: #06121c; font-weight: 600; cursor: pointer; font-size: .95rem;
+}
+button.ghost { background: transparent; color: var(--muted); }
+button:hover { filter: brightness(1.08); }
+ul { list-style: none; margin: 0; padding: 0; }
+li { display: flex; align-items: center; gap: .75rem; padding: .7rem .2rem; border-bottom: 1px solid var(--line); }
+li:last-child { border-bottom: 0; }
+li .title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+li.done .title { color: var(--muted); text-decoration: line-through; }
+.badge { font-size: .72rem; padding: .15rem .5rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.badge.ok { color: var(--ok); border-color: var(--ok); }
+.empty { color: var(--muted); padding: 1rem .2rem; }
+.err { color: #ff8585; font-size: .9rem; margin-top: .5rem; }
+@media (max-width: 480px) { h1 { font-size: 1.5rem; } .wrap { padding: 1.25rem .75rem 3rem; } }
