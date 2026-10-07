@@ -1,0 +1,135 @@
+# CI pipeline for the Session 16 demo app.
+# Name: Hemang | Enrollment number: 24bcs10209
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CICD and GitHub Actions/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:          # lets me run it by hand from the Actions tab
+
+env:
+  APP_DIR: CICD and GitHub Actions
+  IMAGE_NAME: devops-cicd-demo
+
+jobs:
+  # ---------------------------------------------------------------- LINT
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dev dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: pip install -r requirements-dev.txt
+
+      - name: flake8
+        working-directory: ${{ env.APP_DIR }}
+        run: flake8 app tests --max-line-length=100 --show-source --statistics
+
+  # ---------------------------------------------------------------- TEST
+  test:
+    name: Unit tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:                       # the SAME tests on three interpreters
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dev dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: pip install -r requirements-dev.txt
+
+      - name: pytest with coverage
+        working-directory: ${{ env.APP_DIR }}
+        run: pytest -v --cov=app --cov-report=term --cov-report=xml
+
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ${{ env.APP_DIR }}/coverage.xml
+          retention-days: 7
+
+  # ---------------------------------------------------------------- BUILD
+  build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: [lint, test]            # gate: only runs if BOTH passed
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          docker build \
+            --build-arg APP_VERSION=${{ github.sha }} \
+            -t ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.IMAGE_NAME }}:latest .
+          docker images ${{ env.IMAGE_NAME }}
+
+      - name: Smoke test the image
+        run: |
+          docker run -d --name smoke -p 5000:5000 ${{ env.IMAGE_NAME }}:latest
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:5000/health > /dev/null; then break; fi
+            sleep 2
+          done
+          echo "--- /health ---"
+          curl -s http://localhost:5000/health
+          echo
+          echo "--- /calc/add/2/3 ---"
+          curl -s http://localhost:5000/calc/add/2/3
+          echo
+          docker rm -f smoke
+
+      - name: Save image as an artifact
+        run: docker save ${{ env.IMAGE_NAME }}:latest | gzip > image.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar.gz
+          retention-days: 7
+
+  # ---------------------------------------------------------------- SUMMARY
+  summary:
+    name: Pipeline summary
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    if: always()
+    steps:
+      - name: Write the run summary
+        run: |
+          {
+            echo "## CI Pipeline result"
+            echo ""
+            echo "| Stage | Result |"
+            echo "|---|---|"
+            echo "| Lint  | ${{ needs.lint.result }} |"
+            echo "| Test  | ${{ needs.test.result }} |"
+            echo "| Build | ${{ needs.build.result }} |"
+            echo ""
+            echo "Commit \`${{ github.sha }}\` on \`${{ github.ref_name }}\`"
+            echo ""
+            echo "Hemang - 24bcs10209"
+          } >> $GITHUB_STEP_SUMMARY
