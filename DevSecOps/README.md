@@ -407,6 +407,32 @@ uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
 The uid matches `runAsUser: 10001` in the manifest deliberately — if they disagree, the files
 `chown`ed at build time are owned by a user the container is not running as.
 
+### Proof the whole chain worked
+
+```console
+$ gh run view 37654408041
+  success  Build and unit test        success  Security gate
+  success  SAST (bandit)              success  Push to the container registry
+  success  SCA (pip-audit)            success  Deploy to Kubernetes
+  success  Secret scanning (gitleaks)
+  success  Container image scan (Trivy)
+
+$ docker pull ghcr.io/hemangtk/devops-cicd-demo:269e35b34230
+Digest: sha256:9695bfc9f272cc386d601199d9e9fde61f40c1f0462af78689f97deabcad394a
+Status: Downloaded newer image for ghcr.io/hemangtk/devops-cicd-demo:269e35b34230
+
+$ docker run --rm --entrypoint sh <image> -c 'id'
+uid=10001(appuser) gid=10001(appuser) groups=10001(appuser)
+
+$ curl localhost:5111/calc/add/2/3
+{"a":2.0,"b":3.0,"op":"add","result":5.0}
+```
+
+Pulled anonymously from a different machine than the one that built it, by the commit-SHA tag,
+and it still serves — dropping to a non-root user broke nothing.
+
+![gated push to GHCR](screenshots/registry-push.png)
+
 ![local security scans](screenshots/security-scans-local.png)
 
 ---
@@ -447,3 +473,13 @@ kubeconform -strict -summary DevSecOps/k8s/
    tree is still fully scanned.
 6. **Run scanners locally first.** The gitleaks TOML schema error and the bandit finding were both
    caught before any push.
+7. **The push is the security boundary, not the scan.** Scanning an image that never leaves CI
+   protects nobody; `needs: [security-gate]` on the push job is what the gate is actually for,
+   and the `if:` on `refs/heads/main` keeps untrusted pull-request code from publishing anything.
+8. **`runAsNonRoot: true` does not make a container non-root** — it refuses to start one that
+   isn't. I had it in the manifest while the image still ran as uid 0, and only caught it by
+   pulling the pushed image back and running `id`. The pod spec and the Dockerfile have to agree.
+9. **Tag by commit SHA, not `latest`.** `latest` cannot answer "what is running in production",
+   which makes both incident response and rollback guesswork.
+10. **Verify the artefact, not the green tick.** Pulling the image back by digest from a different
+   machine is a different fact from the pipeline reporting success.
