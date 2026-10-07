@@ -1,0 +1,27 @@
+# Alerting rules - the third pillar of monitoring after metrics and logs.
+# Name: Hemang | Enrollment number: 24bcs10209
+groups:
+  - name: host
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 80
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "CPU above 80% on {{ $labels.instance }}"
+          description: "CPU has been over 80% for 2 minutes."
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Memory above 85% on {{ $labels.instance }}"
+
+      - alert: TargetDown
+        expr: up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "Target {{ $labels.job }} is DOWN"
+          description: "Prometheus cannot scrape {{ $labels.instance }}."
