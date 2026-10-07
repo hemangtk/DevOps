@@ -1,0 +1,60 @@
+# A StatefulSet: stable ordinal names and a disk per Pod.
+# Contrast with the Deployment in deployment.yaml, whose Pods are interchangeable.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-headless
+  labels: { app: web-sts }
+spec:
+  clusterIP: None # headless: DNS returns the Pod IPs, not a VIP
+  selector: { app: web-sts }
+  ports:
+    - port: 80
+      name: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web-sts
+spec:
+  serviceName: web-headless
+  replicas: 3
+  selector:
+    matchLabels: { app: web-sts }
+  template:
+    metadata:
+      labels: { app: web-sts }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+              name: http
+          # A deliberate startup delay, so OrderedReady is actually visible:
+          # nginx is otherwise ready too fast to see pod N wait for pod N-1.
+          # tcpSocket, not httpGet - the mounted volume starts empty, and nginx
+          # answers 403 for a directory with no index.html, which would fail
+          # an httpGet probe forever.
+          readinessProbe:
+            tcpSocket: { port: http }
+            initialDelaySeconds: 6
+            periodSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/nginx/html
+          resources:
+            requests: { cpu: "25m", memory: "32Mi" }
+            limits: { cpu: "200m", memory: "128Mi" }
+
+  # one PVC per Pod, named data-web-sts-0, data-web-sts-1, ...
+  # These OUTLIVE the Pods, which is the whole point.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 64Mi
