@@ -111,30 +111,45 @@ jobs:
     needs: [build-test]
     steps:
       - uses: actions/checkout@v4
+
       - name: Build the image
         working-directory: ${{ env.APP_DIR }}
         run: docker build -t ${{ env.IMAGE_NAME }}:scan .
 
-      - name: Trivy - full report (informational)
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:scan
-          format: table
-          output: trivy-report.txt
-          severity: 'LOW,MEDIUM,HIGH,CRITICAL'
-          exit-code: '0'
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.75.0
+          trivy --version
 
-      - name: Show the report
-        run: cat trivy-report.txt
+      - name: Full report (informational, never fails the job)
+        run: |
+          trivy image --scanners vuln --severity LOW,MEDIUM,HIGH,CRITICAL \
+            --exit-code 0 --no-progress \
+            --format table --output trivy-report.txt \
+            ${{ env.IMAGE_NAME }}:scan
+          echo "----- Trivy report -----"
+          head -40 trivy-report.txt
 
-      - name: Trivy - THE GATE (fail on CRITICAL)
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:scan
-          format: table
-          severity: 'CRITICAL'
-          ignore-unfixed: true      # don't block on CVEs with no patch available
-          exit-code: '1'            # <-- this is what makes it a gate
+      - name: Count findings by severity
+        run: |
+          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 \
+            --no-progress --format json --output trivy.json ${{ env.IMAGE_NAME }}:scan
+          python3 - <<'PYEOF'
+          import json
+          d = json.load(open("trivy.json"))
+          counts = {}
+          for r in d.get("Results", []):
+              for v in r.get("Vulnerabilities", []) or []:
+                  counts[v["Severity"]] = counts.get(v["Severity"], 0) + 1
+          print("HIGH/CRITICAL counts (including unfixed):", counts or "none")
+          PYEOF
+
+      - name: THE GATE - fail only on CRITICAL that actually have a fix
+        run: |
+          trivy image --scanners vuln --severity CRITICAL --ignore-unfixed \
+            --exit-code 1 --no-progress ${{ env.IMAGE_NAME }}:scan
+          echo "IMAGE SCAN GATE: passed - no fixable CRITICAL vulnerabilities"
 
       - uses: actions/upload-artifact@v4
         if: always()
