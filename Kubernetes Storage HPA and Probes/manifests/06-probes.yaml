@@ -1,0 +1,52 @@
+# All three probe types on one container, so their different jobs are visible.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probed-app
+  namespace: s13
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: probed-app }
+  template:
+    metadata:
+      labels: { app: probed-app }
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 80 }]
+
+          # STARTUP: "has the app finished booting?"
+          # While this is failing, the other two probes are DISABLED.
+          # Gives a slow starter up to 30 x 2s = 60s before liveness can kill it.
+          startupProbe:
+            httpGet: { path: /, port: 80 }
+            failureThreshold: 30
+            periodSeconds: 2
+
+          # READINESS: "should this pod receive traffic?"
+          # Failing -> removed from Service endpoints. NOT restarted.
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 3
+
+          # LIVENESS: "is this container wedged?"
+          # Failing -> container is KILLED and restarted.
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: probed-app
+  namespace: s13
+spec:
+  selector: { app: probed-app }
+  ports: [{ port: 80, targetPort: 80 }]

@@ -1,0 +1,20 @@
+# A SECOND, different pod mounting the SAME claim - proves the data survived
+# the first pod being deleted.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-reader
+  namespace: s13
+spec:
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ['sh','-c','echo "--- pvc-reader sees ---"; cat /data/persistent.txt']
+      volumeMounts:
+        - { name: vol, mountPath: /data }
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: data-pvc

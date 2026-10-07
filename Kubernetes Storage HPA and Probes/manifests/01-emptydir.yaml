@@ -1,0 +1,23 @@
+# emptyDir - scratch space that lives and dies with the POD.
+# Two containers share it; it survives a container restart but not a pod delete.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vol-emptydir
+  namespace: s13
+spec:
+  containers:
+    - name: writer
+      image: busybox:1.36
+      command: ['sh','-c','for i in $(seq 1 5); do echo "line $i from writer" >> /shared/log.txt; sleep 1; done; sleep 3600']
+      volumeMounts:
+        - { name: scratch, mountPath: /shared }
+    - name: reader
+      image: busybox:1.36
+      command: ['sh','-c','sleep 8; echo "--- reader sees ---"; cat /shared/log.txt; sleep 3600']
+      volumeMounts:
+        - { name: scratch, mountPath: /shared }
+  volumes:
+    - name: scratch
+      emptyDir: {}

@@ -1,0 +1,19 @@
+# A pod whose readiness probe points at a path that does not exist.
+# It runs happily but never becomes Ready, so it never joins the Service.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata:
+  name: never-ready
+  namespace: s13
+  labels: { app: probed-app }      # same label as the Service above!
+spec:
+  containers:
+    - name: web
+      image: nginx:1.27-alpine
+      ports: [{ containerPort: 80 }]
+      readinessProbe:
+        httpGet: { path: /does-not-exist, port: 80 }
+        initialDelaySeconds: 2
+        periodSeconds: 3
+        failureThreshold: 2

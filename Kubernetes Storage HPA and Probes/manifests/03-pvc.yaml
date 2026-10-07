@@ -1,0 +1,32 @@
+# PersistentVolumeClaim -> dynamically provisioned by the StorageClass.
+# The data outlives the pod entirely.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-pvc
+  namespace: s13
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard      # minikube's default dynamic provisioner
+  resources:
+    requests:
+      storage: 128Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-writer
+  namespace: s13
+spec:
+  restartPolicy: Never
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ['sh','-c','echo "persisted by pvc-writer at $(date)" >> /data/persistent.txt; echo written; cat /data/persistent.txt']
+      volumeMounts:
+        - { name: vol, mountPath: /data }
+  volumes:
+    - name: vol
+      persistentVolumeClaim:
+        claimName: data-pvc

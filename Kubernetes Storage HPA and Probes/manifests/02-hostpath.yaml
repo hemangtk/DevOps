@@ -1,0 +1,20 @@
+# hostPath - mounts a path from the NODE's filesystem into the pod.
+# Powerful and dangerous: ties the pod to one node and can escape isolation.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vol-hostpath
+  namespace: s13
+spec:
+  containers:
+    - name: app
+      image: busybox:1.36
+      command: ['sh','-c','echo "written by $(hostname) at $(date)" > /nodedata/proof.txt; cat /nodedata/proof.txt; sleep 3600']
+      volumeMounts:
+        - { name: nodedir, mountPath: /nodedata }
+  volumes:
+    - name: nodedir
+      hostPath:
+        path: /tmp/k8s-hostpath-demo
+        type: DirectoryOrCreate
