@@ -24,9 +24,9 @@ data:
           ]
         },
         {
-          "type": "stat", "title": "Tasks stored",
+          "type": "stat", "title": "Copies on loan",
           "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
-          "targets": [ { "expr": "max(stacks_tasks_total)" } ]
+          "targets": [ { "expr": "max(stacks_books_total{state=\"borrowed\"})" } ]
         },
         {
           "type": "stat", "title": "Backend pods UP",
@@ -34,9 +34,14 @@ data:
           "targets": [ { "expr": "sum(up{job=\"stacks-pods\"})" } ]
         },
         {
-          "type": "stat", "title": "Errors (5xx)",
-          "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+          "type": "stat", "title": "Errors (5xx, excl. probes)",
+          "gridPos": { "h": 6, "w": 3, "x": 18, "y": 0 },
           "targets": [ { "expr": "sum(stacks_http_errors_total)" } ]
+        },
+        {
+          "type": "stat", "title": "Readiness 503s",
+          "gridPos": { "h": 6, "w": 3, "x": 21, "y": 0 },
+          "targets": [ { "expr": "sum(stacks_not_ready_total)" } ]
         },
         {
           "type": "timeseries", "title": "HTTP request rate",
@@ -54,6 +59,15 @@ data:
               "legendFormat": "{{pod}}" }
           ],
           "fieldConfig": { "defaults": { "unit": "s" } }
+        },
+        {
+          "type": "timeseries", "title": "The shelf over time",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 15 },
+          "targets": [
+            { "expr": "max(stacks_books_total{state=\"available\"})", "legendFormat": "on the shelf" },
+            { "expr": "max(stacks_books_total{state=\"borrowed\"})", "legendFormat": "on loan" },
+            { "expr": "max(stacks_books_overdue)", "legendFormat": "overdue" }
+          ]
         }
       ]
     }

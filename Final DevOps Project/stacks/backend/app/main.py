@@ -41,7 +41,18 @@ app.add_middleware(
 )
 
 _started = time.time()
-_metrics = {"requests_total": 0, "errors_total": 0, "latency_sum": 0.0}
+_metrics = {
+    "requests_total": 0,
+    "errors_total": 0,
+    "not_ready_total": 0,
+    "latency_sum": 0.0,
+}
+
+# /ready answers 503 on purpose while the database is still coming up. That is
+# the probe working, not the application failing, so it is counted separately -
+# otherwise every normal rollout puts a spike on the error panel and anyone
+# alerting on errors_total gets paged for a healthy start.
+_PROBE_PATHS = {"/ready", "/health"}
 
 
 @app.middleware("http")
@@ -52,7 +63,10 @@ async def record_metrics(request: Request, call_next):
     _metrics["requests_total"] += 1
     _metrics["latency_sum"] += elapsed
     if response.status_code >= 500:
-        _metrics["errors_total"] += 1
+        if request.url.path in _PROBE_PATHS:
+            _metrics["not_ready_total"] += 1
+        else:
+            _metrics["errors_total"] += 1
     return response
 
 
@@ -87,10 +101,14 @@ def metrics(db: Session = Depends(database.get_db)) -> Response:
             "# TYPE stacks_http_requests_total counter",
             f'stacks_http_requests_total{{version="{settings.APP_VERSION}"}} '
             f'{_metrics["requests_total"]}',
-            "# HELP stacks_http_errors_total Total 5xx responses.",
+            "# HELP stacks_http_errors_total Total 5xx responses, excluding probes.",
             "# TYPE stacks_http_errors_total counter",
             f'stacks_http_errors_total{{version="{settings.APP_VERSION}"}} '
             f'{_metrics["errors_total"]}',
+            "# HELP stacks_not_ready_total Times the readiness probe answered 503.",
+            "# TYPE stacks_not_ready_total counter",
+            f'stacks_not_ready_total{{version="{settings.APP_VERSION}"}} '
+            f'{_metrics["not_ready_total"]}',
             "# HELP stacks_request_latency_seconds Average request latency.",
             "# TYPE stacks_request_latency_seconds gauge",
             f"stacks_request_latency_seconds {avg:.6f}",

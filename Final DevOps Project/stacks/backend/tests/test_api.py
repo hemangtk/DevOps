@@ -160,3 +160,18 @@ def test_a_copy_on_loan_cannot_be_withdrawn(client):
     response = client.delete(f"/api/books/{book['id']}")
     assert response.status_code == 409
     assert "on loan" in response.json()["detail"]
+
+
+def test_probe_503s_are_not_counted_as_application_errors(client, monkeypatch):
+    """A readiness 503 during startup must not page anyone."""
+    from app import db as database
+    from app.main import _metrics
+
+    before_err = _metrics["errors_total"]
+    before_nr = _metrics["not_ready_total"]
+
+    monkeypatch.setattr(database, "database_reachable", lambda: False)
+    assert client.get("/ready").status_code == 503
+
+    assert _metrics["errors_total"] == before_err        # unchanged
+    assert _metrics["not_ready_total"] == before_nr + 1  # counted separately

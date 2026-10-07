@@ -4,8 +4,16 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{/* Release name and chart name are both "stacks" by default, so a plain
+     "<release>-<chart>" would render "stacks-stacks-backend". Collapse the
+     two when the release name already contains the chart name. */}}
 {{- define "stacks.fullname" -}}
-{{- printf "%s-%s" .Release.Name (include "stacks.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- $name := include "stacks.name" . -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 {{- end -}}
 
 {{- define "stacks.labels" -}}
