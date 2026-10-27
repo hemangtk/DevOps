@@ -136,7 +136,14 @@ jobs:
 
       - name: Smoke test the backend image
         run: |
-          docker run -d --name smoke -p 8000:8000 "$BACKEND_IMAGE:${{ steps.meta.outputs.sha_tag }}"
+          # a real Postgres beside it, and the same migrate-then-serve order as the chart
+          docker network create smoke-net
+          docker run -d --name smoke-db --network smoke-net \
+            -e POSTGRES_USER=stacks -e POSTGRES_PASSWORD=stacks -e POSTGRES_DB=stacks postgres:16-alpine
+          for i in $(seq 1 30); do docker exec smoke-db pg_isready -U stacks >/dev/null 2>&1 && break || sleep 1; done
+          docker run -d --name smoke --network smoke-net -p 8000:8000 -e POSTGRES_HOST=smoke-db \
+            "$BACKEND_IMAGE:${{ steps.meta.outputs.sha_tag }}" \
+            sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
           for i in $(seq 1 25); do curl -sf localhost:8000/health >/dev/null && break || sleep 2; done
           echo "--- /health ---"; curl -s localhost:8000/health; echo
           echo "--- POST /api/books ---"
@@ -145,7 +152,7 @@ jobs:
             localhost:8000/api/books; echo
           echo "--- GET /api/books ---"; curl -sf localhost:8000/api/books; echo
           echo "--- /metrics ---"; curl -s localhost:8000/metrics | head -3
-          docker rm -f smoke
+          docker rm -f smoke smoke-db
 
       - name: Install Trivy
         run: |
