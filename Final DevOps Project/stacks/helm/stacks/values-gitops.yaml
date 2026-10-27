@@ -5,8 +5,8 @@
 
 backend:
   image:
-    tag: "471659933796"
+    tag: "e27dd635945a"
 
 frontend:
   image:
-    tag: "471659933796"
+    tag: "e27dd635945a"
