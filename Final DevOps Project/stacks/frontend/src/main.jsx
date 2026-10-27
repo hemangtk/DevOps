@@ -153,7 +153,7 @@ function App() {
     <main>
       <header>
         <h1>Stacks</h1>
-        <p className="sub">A small library lending desk &middot; Hemang &middot; 24bcs10209</p>
+        <p className="sub">A small library lending desk &middot; Hemang &middot; 24bcs10209 &middot; delivered by Argo CD</p>
       </header>
 
       <Stats stats={stats} />
