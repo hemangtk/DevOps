@@ -9,7 +9,8 @@ deliberately modest; the point of this project is everything around it — a com
 scanned image in a registry becoming a running, autoscaling, monitored Kubernetes deployment.
 
 Source: [`stacks/`](stacks/) · Pipeline:
-[`.github/workflows/stacks.yml`](../.github/workflows/stacks.yml)
+[`.github/workflows/stacks.yml`](../.github/workflows/stacks.yml) · GitOps:
+[`stacks/gitops/`](stacks/gitops/) · **Presentation video and slides: [`demo/`](demo/)**
 
 > **On the domain.** The course's `GRADING.md` requires the application domain to be the
 > student's own and scores a direct clone of the TaskBoard reference project zero across every
@@ -27,14 +28,15 @@ Source: [`stacks/`](stacks/) · Pipeline:
 |---|---|---|
 | **M1** | Application | [below](#m1--application) · 6 endpoints, Alembic migration, React UI |
 | **M2** | Testing | [below](#m2--testing) · 20 tests, 95% coverage, SQLite not Postgres |
-| **M3** | Git and GitHub | [below](#m3--git-and-github) · public repo, 34 commits, `.gitignore` |
+| **M3** | Git and GitHub | [below](#m3--git-and-github) · public repo, 40+ commits, `.gitignore` |
 | **M4** | Docker | [below](#m4--docker) · multi-stage, **both images non-root** |
-| **M5** | CI/CD | [below](#m5--cicd) · 6 gated jobs, GHCR, SHA tags |
+| **M5** | CI/CD | [below](#m5--cicd) · 7 gated jobs, GHCR, SHA tags, GitOps bump |
 | **M6** | DevSecOps | [below](#m6--devsecops) · Trivy on both images, fixable-only gate |
 | **M7** | Terraform | [below](#m7--terraform) · VPC + 2 public subnets; **EKS caveat stated** |
 | **M8** | Kubernetes + Helm | [below](#m8--kubernetes--helm) · 2+2 replicas, Ingress, HPA, PVC |
 | **M9** | Observability | [below](#m9--observability) · Prometheus scraping, Grafana populated |
-| **M10** | Documentation | this file, and the live-demo loop at the end |
+| — | GitOps | [below](#gitops--argo-cd) · Argo CD syncs the chart from `main`; CI only writes Git |
+| **M10** | Presentation + Documentation | this file · [`demo/`](demo/) video (MP4) and slides (PPTX + PDF) |
 
 ---
 
@@ -55,6 +57,32 @@ Source: [`stacks/`](stacks/) · Pipeline:
           │  /metrics          │
           └────────────────────┘
 ```
+
+How a commit reaches the cluster:
+
+```text
+git push ─► GitHub Actions ─► test · scan · build ─► GHCR (image:<sha>)
+                  │
+                  └─► commit image tag to values-gitops.yaml ─► Argo CD ─► Kubernetes
+                                                                            │
+                                                     Prometheus ◄── /metrics ┘ ──► Grafana
+```
+
+### Tech stack
+
+| Layer | Tools |
+|---|---|
+| Backend | Python 3.12, FastAPI, SQLAlchemy 2, Alembic, Pydantic, uvicorn |
+| Frontend | React 18, Vite, served by nginx |
+| Database | PostgreSQL 16 (SQLite in tests) |
+| Testing | pytest, pytest-cov, flake8 |
+| Containers | Docker (multi-stage, non-root), Docker Compose |
+| CI/CD | GitHub Actions, GitHub Container Registry (GHCR) |
+| Security | Trivy, bandit (SAST), pip-audit (SCA), gitleaks |
+| Infrastructure | Terraform, AWS VPC / EKS modules, LocalStack |
+| Orchestration | Kubernetes (minikube), Helm 3, ingress-nginx, metrics-server, HPA |
+| GitOps | Argo CD |
+| Observability | Prometheus, Grafana |
 
 ### The API
 
@@ -225,7 +253,7 @@ needs no running services.
 
 ## M3 — Git and GitHub
 
-Public at **<https://github.com/hemangtk/DevOps>**, 34 commits (the rubric asks for 10), each
+Public at **<https://github.com/hemangtk/DevOps>**, 40+ commits (the rubric asks for 10), each
 describing what changed and
 why. `.gitignore` excludes `.env`, `__pycache__`, `node_modules`, `.venv`, `.terraform/`,
 `*.tfstate` and `terraform.tfvars`; only `.env.example` and `terraform.tfvars.example` are
@@ -267,22 +295,28 @@ directories the entrypoint's `envsubst` step writes into.
 
 ## M5 — CI/CD
 
-Six jobs, and the dependency edges are the point:
+Seven jobs, and the dependency edges are the point:
 
 ```text
   Lint and test (pytest) ─┐
-  Build the frontend ─────┼──► Build, scan and push both images ──► Release gate
-  SAST, SCA, secret scan ─┤                                           ▲
-  Validate manifests ─────┴───────────────────────────────────────────┘
+  Build the frontend ─────┼──► Build, scan and push both images ──► Release gate ──► Bump GitOps image tag
+  SAST, SCA, secret scan ─┤                                           ▲                     │
+  Validate manifests ─────┴───────────────────────────────────────────┘                     ▼
+                                                                              commit to Git → Argo CD
 ```
 
 ```console
-$ gh run view 37661812588
-Session 21: do not count readiness 503s as application errors  sha=5ecafd5b515b  success
-  success  Lint and test (pytest)        success  Build, scan and push both images
-  success  Build the frontend            success  Release gate
-  success  SAST, SCA and secret scan     success  Validate manifests and chart
+$ gh run view 40507987650
+Session 21: smoke-test the backend image against a real Postgres  sha=471659933796  success
+  success  Lint and test (pytest)           success  Build, scan and push both images
+  success  Build the frontend               success  Release gate
+  success  SAST, SCA and secret scan        success  Bump GitOps image tag
+  success  Validate manifests and chart
 ```
+
+The smoke test inside the image job runs the freshly built backend beside a real Postgres
+container, applies the Alembic migration, then creates and lists a book. The status code of
+every call is checked, so a broken image fails the job instead of printing an error and passing.
 
 ### Images in GHCR, tagged by commit SHA
 
@@ -547,28 +581,82 @@ time at the bottom.
 
 ---
 
-## M10 — Documentation and the live demo
+## GitOps — Argo CD
+
+The pipeline never runs `kubectl` or `helm` against the cluster. Its last job, **Bump GitOps
+image tag**, writes the commit SHA it just pushed to GHCR into one file and commits it:
+
+```yaml
+# stacks/helm/stacks/values-gitops.yaml - the only file CI writes
+backend:
+  image:
+    tag: "<12-char commit sha>"
+frontend:
+  image:
+    tag: "<12-char commit sha>"
+```
+
+The Argo CD `Application` in [`stacks/gitops/argocd-application.yaml`](stacks/gitops/argocd-application.yaml)
+watches `main`, renders `helm/stacks` with `values.yaml` + `values-gitops.yaml`, and keeps the
+`stacks` namespace equal to Git:
+
+| Setting | Effect |
+|---|---|
+| `automated.prune: true` | a resource deleted from Git is deleted from the cluster |
+| `automated.selfHeal: true` | a manual `kubectl edit` is reverted to what Git says |
+| `CreateNamespace=true` | a fresh cluster needs only the Application, nothing else |
 
 ```bash
-# 1. change something
-vim stacks/backend/app/main.py
+kubectl apply -f stacks/gitops/argocd-application.yaml
+kubectl get application stacks -n argocd      # SYNC STATUS: Synced   HEALTH STATUS: Healthy
+```
 
-# 2. commit and push
+The bump commit carries `[skip ci]`, so it does not start a second pipeline; it only moves the
+cluster. Rolling back is `git revert` of that commit, which Argo CD applies the same way.
+
+![Argo CD: stacks Synced and Healthy](screenshots/argocd-synced.png)
+
+---
+
+## M10 — Presentation and documentation
+
+Everything M10 asks for is in [`demo/`](demo/):
+
+| File | What it is |
+|---|---|
+| [`demo/stacks-presentation.mp4`](demo/stacks-presentation.mp4) | The presentation video: the slides, then a live walkthrough of the codebase, a push running the pipeline end to end, Terraform, Argo CD, Kubernetes, Prometheus and Grafana |
+| [`demo/stacks-presentation.pptx`](demo/stacks-presentation.pptx) | The slide deck |
+| [`demo/stacks-presentation.pdf`](demo/stacks-presentation.pdf) | The same deck as PDF |
+
+The loop the video demonstrates:
+
+```bash
+# 1. change something, commit, push
 git commit -am "..." && git push
 
-# 3. watch the pipeline
+# 2. watch the pipeline: test -> scan -> build -> GHCR -> gate -> bump GitOps tag
 gh run watch
 
-# 4. the new image is in GHCR, tagged with this commit
-docker pull ghcr.io/hemangtk/stacks-backend:$(git rev-parse --short=12 HEAD)
-
-# 5. roll it out
-helm upgrade --install stacks helm/stacks -n stacks --wait
+# 3. Argo CD sees the new tag in Git and rolls the pods
+kubectl get application stacks -n argocd
 kubectl get pods -n stacks -w
 ```
 
-That loop is the whole project: a commit is the only input, and everything downstream — tests,
-scans, the registry, the cluster — follows from it.
+A commit is the only input. Tests, scans, the registry and the cluster all follow from it.
+
+---
+
+## Known issues and limitations
+
+- **No real EKS cluster.** There is no AWS account behind this project. Terraform runs against
+  LocalStack, whose free tier answers `CreateCluster` with HTTP 501, so 13 of 15 resources apply
+  and the two EKS resources do not ([details](#the-eks-gap-stated-plainly)). The video shows the
+  `terraform plan` and the LocalStack VPC instead of the AWS Console.
+- **Kubernetes runs on minikube**, which stands in for EKS. Ingress, HPA and Argo CD are real;
+  the cluster is a single local node.
+- **The Postgres password in `values.yaml` is a demo value.** In production it would come from
+  Sealed Secrets or the External Secrets Operator.
+- **Images are built for `linux/amd64` only.** They run on Apple Silicon through emulation.
 
 ---
 
@@ -581,6 +669,8 @@ cd backend && pytest -v --cov=app  # 20 tests
 
 kubectl apply -f k8s/namespace.yaml
 helm upgrade --install stacks helm/stacks -n stacks --wait
+# or, the GitOps way (needs Argo CD installed in the "argocd" namespace):
+kubectl apply -f gitops/argocd-application.yaml
 kubectl apply -f monitoring/in-cluster-stack.yaml
 kubectl apply -f monitoring/grafana-dashboard.yaml -n monitoring
 
