@@ -1,0 +1,12 @@
+# GitOps image pins - the ONLY file the pipeline writes to.
+# The "Bump GitOps image tag" job in .github/workflows/stacks.yml rewrites both
+# tags to the commit SHA it just pushed to GHCR; Argo CD sees the commit and syncs.
+# Name: Hemang | Enrollment number: 24bcs10209
+
+backend:
+  image:
+    tag: "19bbb37a167b"
+
+frontend:
+  image:
+    tag: "19bbb37a167b"

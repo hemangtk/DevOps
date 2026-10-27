@@ -1,0 +1,34 @@
+# Argo CD Application - Stacks
+# Git is the source of truth: Argo CD renders helm/stacks from the main branch
+# with values.yaml + values-gitops.yaml and keeps the "stacks" namespace equal to it.
+# Name: Hemang | Enrollment number: 24bcs10209
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: stacks
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/hemangtk/DevOps.git
+    targetRevision: main
+    path: Final DevOps Project/stacks/helm/stacks
+    helm:
+      releaseName: stacks
+      valueFiles:
+        - values.yaml
+        - values-gitops.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: stacks
+  syncPolicy:
+    automated:
+      prune: true       # delete what was removed from Git
+      selfHeal: true    # undo manual kubectl edits
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

@@ -139,10 +139,11 @@ jobs:
           docker run -d --name smoke -p 8000:8000 "$BACKEND_IMAGE:${{ steps.meta.outputs.sha_tag }}"
           for i in $(seq 1 25); do curl -sf localhost:8000/health >/dev/null && break || sleep 2; done
           echo "--- /health ---"; curl -s localhost:8000/health; echo
-          echo "--- POST /api/tasks ---"
-          curl -s -X POST -H 'Content-Type: application/json' \
-            -d '{"title":"from CI"}' localhost:8000/api/tasks; echo
-          echo "--- GET /api/tasks ---"; curl -s localhost:8000/api/tasks; echo
+          echo "--- POST /api/books ---"
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            -d '{"title":"Built in CI","author":"GitHub Actions","isbn":"9780306406157"}' \
+            localhost:8000/api/books; echo
+          echo "--- GET /api/books ---"; curl -sf localhost:8000/api/books; echo
           echo "--- /metrics ---"; curl -s localhost:8000/metrics | head -3
           docker rm -f smoke
 
@@ -258,3 +259,38 @@ jobs:
             echo ""
             echo "Hemang - 24bcs10209"
           } >> $GITHUB_STEP_SUMMARY
+
+  # ====================================================== GITOPS (Argo CD)
+  # CI never touches the cluster. It writes the new image tag into Git, and
+  # Argo CD (gitops/argocd-application.yaml) pulls that change and syncs it.
+  gitops:
+    name: Bump GitOps image tag
+    runs-on: ubuntu-latest
+    needs: [gate, images]
+    if: github.event_name == 'push' && needs.gate.result == 'success'
+    permissions:
+      contents: write
+    concurrency: gitops-bump
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+
+      - name: Pin both images to this commit's SHA
+        env:
+          TAG: ${{ needs.images.outputs.sha_tag }}
+        run: |
+          f="$PROJECT_DIR/helm/stacks/values-gitops.yaml"
+          sed -i -E "s/^(    tag: ).*/\1\"$TAG\"/" "$f"
+          echo "--- $f ---"; cat "$f"
+
+      - name: Commit and push (Argo CD picks this up)
+        env:
+          TAG: ${{ needs.images.outputs.sha_tag }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$PROJECT_DIR/helm/stacks/values-gitops.yaml"
+          if git diff --cached --quiet; then echo "tag already $TAG"; exit 0; fi
+          git commit -m "gitops: deploy stacks $TAG [skip ci]"
+          for i in 1 2 3; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep 5; done
+          exit 1
